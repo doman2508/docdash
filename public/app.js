@@ -100,7 +100,7 @@ function normalizeSearchText(value) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/ł/g, "l");
+    .replace(/\u0142/g, "l");
 }
 
 function getDateSortValue(label) {
