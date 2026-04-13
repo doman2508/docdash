@@ -31,6 +31,7 @@ const state = {
   selectedImportId: null,
   selectedPatientName: null,
   activeDateKey: null,
+  patientSearch: "",
   showDayFollowup: false,
   showImportArchive: false,
   activeView: "dashboard"
@@ -92,6 +93,14 @@ function normalizeDateKey(label) {
   }
 
   return String(label).trim();
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ł/g, "l");
 }
 
 function getDateSortValue(label) {
@@ -202,6 +211,19 @@ function getPatients() {
 function getSelectedPatient() {
   const patients = getPatients();
   return patients.find((patient) => patient.patientName === state.selectedPatientName) || patients[0];
+}
+
+function getFilteredPatients() {
+  const patients = getPatients();
+  const search = normalizeSearchText(state.patientSearch);
+
+  if (!search) {
+    return patients;
+  }
+
+  return patients.filter((patient) => {
+    return normalizeSearchText(`${patient.patientName} ${patient.activeStatus}`).includes(search);
+  });
 }
 
 function getImports() {
@@ -507,19 +529,47 @@ function renderVisitForm() {
 
 function renderPatients() {
   const patients = getPatients();
-  const selectedPatient = getSelectedPatient();
+  const filteredPatients = getFilteredPatients();
+  let selectedPatient = getSelectedPatient();
+  const searchInput = document.getElementById("patient-search");
+  const searchMeta = document.getElementById("patient-search-meta");
+
+  if (searchInput) {
+    searchInput.value = state.patientSearch;
+  }
+
+  if (filteredPatients.length && !filteredPatients.some((patient) => patient.patientName === selectedPatient?.patientName)) {
+    selectedPatient = filteredPatients[0];
+    state.selectedPatientName = selectedPatient.patientName;
+  }
+
+  if (searchMeta) {
+    searchMeta.textContent = state.patientSearch
+      ? `${filteredPatients.length} z ${patients.length} pacjentow`
+      : `${patients.length} pacjentow`;
+  }
+
+  if (!selectedPatient || !filteredPatients.length) {
+    document.getElementById("patient-heading").textContent = state.patientSearch ? "Brak wynikow" : "Brak pacjentow";
+    document.getElementById("patient-badge").textContent = "pusto";
+    document.getElementById("patient-badge").className = "badge neutral";
+    document.getElementById("patient-list").innerHTML = `<div class="empty-state">Nie znaleziono pacjenta dla tego wyszukiwania.</div>`;
+    document.getElementById("patient-summary-grid").innerHTML = "";
+    document.getElementById("patient-history").innerHTML = "";
+    return;
+  }
 
   document.getElementById("patient-heading").textContent = selectedPatient.patientName;
   document.getElementById("patient-badge").textContent = selectedPatient.activeStatus;
   document.getElementById("patient-badge").className = `badge ${selectedPatient.pending > 0 ? "warning" : "success"}`;
 
-  document.getElementById("patient-list").innerHTML = patients
+  document.getElementById("patient-list").innerHTML = filteredPatients
     .map((patient) => {
       return `
         <article class="patient-item ${patient.patientName === selectedPatient.patientName ? "selected" : ""}" data-patient-name="${patient.patientName}">
           <div>
             <h4>${patient.patientName}</h4>
-            <span>${patient.visitCount} wizyt w workflow - ${patient.importedCount} rekordow z importu - zaleglosc: ${formatCurrency(patient.pending)}</span>
+            <span>${patient.visitCount} wizyt - ZL: ${patient.importedCount} - saldo: ${formatCurrency(patient.pending)}</span>
           </div>
           <span class="badge ${patient.pending > 0 ? "warning" : "success"}">${patient.activeStatus}</span>
         </article>
@@ -529,19 +579,19 @@ function renderPatients() {
 
   document.getElementById("patient-summary-grid").innerHTML = `
     <div class="patient-summary-card">
-      <p>Liczba wizyt</p>
+      <p>Wizyty</p>
       <strong>${selectedPatient.visitCount}</strong>
     </div>
     <div class="patient-summary-card">
-      <p>ZL do przejecia</p>
+      <p>ZL</p>
       <strong>${selectedPatient.importedRows.filter((row) => !row.processed).length}</strong>
     </div>
     <div class="patient-summary-card">
-      <p>Saldo otwarte</p>
+      <p>Saldo</p>
       <strong>${formatCurrency(selectedPatient.pending)}</strong>
     </div>
     <div class="patient-summary-card">
-      <p>Nastepna wizyta</p>
+      <p>Nastepna</p>
       <strong>${selectedPatient.nextVisit ? selectedPatient.nextVisit.nextVisit.plannedLabel : "brak"}</strong>
     </div>
   `;
@@ -1257,6 +1307,12 @@ document.getElementById("export-data-store")?.addEventListener("click", () => {
 });
 
 document.getElementById("import-data-store")?.addEventListener("click", importDataStore);
+
+document.getElementById("patient-search")?.addEventListener("input", (event) => {
+  state.patientSearch = event.target.value;
+  renderPatients();
+  attachActions();
+});
 
 logoutButton?.addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" });

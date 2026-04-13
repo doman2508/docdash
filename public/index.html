@@ -231,7 +231,7 @@
 
         <section class="view" id="patients-view">
           <div class="patients-layout">
-            <section class="panel">
+            <section class="panel patient-list-panel">
               <div class="panel-header">
                 <div>
                   <p class="panel-label">Baza pacjentow</p>
@@ -239,10 +239,15 @@
                 </div>
               </div>
 
+              <div class="patient-search-wrap">
+                <input id="patient-search" type="search" placeholder="Szukaj pacjenta..." autocomplete="off" />
+                <span id="patient-search-meta"></span>
+              </div>
+
               <div class="patient-list" id="patient-list"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel patient-detail-panel">
               <div class="panel-header">
                 <div>
                   <p class="panel-label">Karta pacjenta</p>
@@ -251,7 +256,7 @@
                 <span class="badge neutral" id="patient-badge">aktywny</span>
               </div>
 
-              <div class="patient-summary-grid" id="patient-summary-grid"></div>
+              <div class="patient-summary-grid compact-patient-summary" id="patient-summary-grid"></div>
 
               <div class="panel-header small-gap">
                 <div>

@@ -322,6 +322,11 @@ p {
   gap: 16px;
 }
 
+.patients-layout {
+  grid-template-columns: minmax(260px, 0.85fr) minmax(420px, 1.55fr);
+  align-items: start;
+}
+
 .billing-grid {
   grid-template-columns: 1fr 1fr;
 }
@@ -329,6 +334,11 @@ p {
 .panel {
   padding: 22px;
   border-radius: var(--radius-lg);
+}
+
+.patient-list-panel,
+.patient-detail-panel {
+  padding: 18px;
 }
 
 .day-context-panel {
@@ -461,6 +471,11 @@ p {
   gap: 12px;
 }
 
+.patient-list,
+.patient-history {
+  gap: 8px;
+}
+
 .visit-item,
 .payment-item,
 .next-step-card,
@@ -490,8 +505,43 @@ p {
   cursor: pointer;
 }
 
+.patient-item,
+.patient-history .history-item {
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.patient-item h4,
+.patient-history .history-item h4 {
+  margin-bottom: 4px;
+  font-size: 0.98rem;
+}
+
+.patient-item span,
+.patient-history .history-item span {
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.patient-search-wrap {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.patient-search-wrap input {
+  border-radius: 14px;
+  padding: 11px 13px;
+}
+
+.patient-search-wrap span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .patient-item.selected {
   border-color: rgba(35, 83, 71, 0.24);
+  background: rgba(35, 83, 71, 0.06);
 }
 
 .import-batch-item {
@@ -580,11 +630,51 @@ p {
   margin-bottom: 18px;
 }
 
+.compact-patient-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
 .patient-summary-card {
   padding: 14px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(78, 50, 24, 0.08);
+}
+
+.compact-patient-summary .patient-summary-card {
+  min-height: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.compact-patient-summary .patient-summary-card p {
+  margin-bottom: 5px;
+  font-size: 0.86rem;
+}
+
+.compact-patient-summary .patient-summary-card strong {
+  font-size: 1rem;
+}
+
+.patient-detail-panel .panel-header {
+  margin-bottom: 12px;
+}
+
+.patient-detail-panel .small-gap {
+  margin-top: 4px;
+  margin-bottom: 10px;
+}
+
+.patient-history .history-item {
+  display: grid;
+  grid-template-columns: minmax(145px, 0.8fr) minmax(180px, 1.2fr);
+  align-items: center;
+}
+
+.patient-history .history-item .inbox-actions {
+  justify-content: flex-end;
 }
 
 .patient-summary-card p,
@@ -762,6 +852,10 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .patients-layout {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--line);
@@ -820,6 +914,14 @@ input {
   }
 
   .patient-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-patient-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .patient-history .history-item {
     grid-template-columns: 1fr;
   }
 }
