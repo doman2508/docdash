@@ -1,0 +1,12 @@
+{
+  "name": "docdash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DocDash MVP prototype for specialist practice workflow",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}

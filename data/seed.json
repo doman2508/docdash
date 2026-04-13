@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "monthLabel": "Demo",
+    "newPatients": 1,
+    "weekOccupancy": 0,
+    "openSlots": 0,
+    "lastUpdated": "2026-04-13 00:00"
+  },
+  "visits": [
+    {
+      "id": "demo-visit-1",
+      "patientName": "Pacjent Demo",
+      "source": "demo",
+      "serviceName": "konsultacja psychoterapeutyczna",
+      "workflowStage": "today",
+      "dayBucket": "today",
+      "dateLabel": "13.04.2026",
+      "time": "10:00",
+      "status": "open",
+      "notes": "",
+      "summary": "",
+      "closureChecklist": [
+        {
+          "label": "Wizyta zaplanowana",
+          "done": true
+        },
+        {
+          "label": "Sesja jeszcze nieodbyta",
+          "done": false
+        },
+        {
+          "label": "Brak podsumowania",
+          "done": false
+        },
+        {
+          "label": "Brak rozliczenia",
+          "done": false
+        }
+      ],
+      "nextVisit": {
+        "status": "to_schedule",
+        "label": "demo",
+        "plannedLabel": "Do ustalenia po sesji",
+        "note": "Fikcyjny rekord startowy do deploya."
+      },
+      "followUp": {
+        "paymentReminderSent": false,
+        "documentReady": false,
+        "zlSynced": false,
+        "lastActionLabel": "Dane demo"
+      },
+      "payment": {
+        "amount": 250,
+        "status": "pending",
+        "statusLabel": "platnosc oczekuje",
+        "method": "transfer",
+        "documentType": "none",
+        "documentIssued": false,
+        "followUpLabel": "do rozliczenia po sesji"
+      }
+    }
+  ],
+  "imports": []
+}

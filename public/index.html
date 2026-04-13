@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DocDash</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">DD</div>
+          <div>
+            <p class="eyebrow">MVP prototype</p>
+            <h1>DocDash</h1>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button class="nav-link active" data-view="dashboard">Dzien</button>
+          <button class="nav-link" data-view="imports">Importy</button>
+          <button class="nav-link" data-view="patients">Pacjenci</button>
+          <button class="nav-link" data-view="visit">Sesja</button>
+          <button class="nav-link" data-view="billing">Rozliczenia</button>
+          <button class="nav-link" data-view="stats">Statystyki</button>
+        </nav>
+
+        <section class="sidebar-card">
+          <p class="sidebar-label">Obietnica produktu</p>
+          <h2>Od wizyty do rozliczenia bez recznej rzezby</h2>
+          <p>
+            Pacjent przychodzi ze ZL, a DocDash pilnuje dalszego procesu:
+            notatek, kolejnej wizyty, platnosci i domkniecia dnia.
+          </p>
+        </section>
+      </aside>
+
+      <main class="content">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Workflow specjalisty</p>
+            <h2 id="view-title">Dzien pracy</h2>
+            <p id="view-subtitle">
+              Jedno miejsce do ogarniania sesji, zaleglosci i kolejnych krokow.
+            </p>
+          </div>
+          <div class="hero-actions">
+            <button class="secondary" type="button">Import z ZL</button>
+            <button class="primary" id="open-create-visit" type="button">Nowa wizyta</button>
+            <button class="ghost" id="logout-button" type="button">Wyloguj</button>
+          </div>
+        </header>
+
+        <div class="save-status" id="save-status" data-state="idle"></div>
+
+        <section class="panel create-visit-panel" id="create-visit-panel" hidden>
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Nowa wizyta</p>
+              <h3>Dodaj wizyte recznie</h3>
+            </div>
+          </div>
+
+          <div class="create-visit-grid">
+            <div class="form-section">
+              <label for="create-patient-name">Pacjent</label>
+              <input id="create-patient-name" type="text" />
+            </div>
+            <div class="form-section">
+              <label for="create-date-label">Data</label>
+              <input id="create-date-label" type="text" />
+            </div>
+            <div class="form-section">
+              <label for="create-time">Godzina</label>
+              <input id="create-time" type="text" placeholder="np. 14:00" />
+            </div>
+            <div class="form-section">
+              <label for="create-service-name">Usluga</label>
+              <input id="create-service-name" type="text" value="konsultacja psychoterapeutyczna" />
+            </div>
+            <div class="form-section">
+              <label for="create-amount">Kwota</label>
+              <input id="create-amount" type="number" min="0" step="1" value="250" />
+            </div>
+            <div class="form-section">
+              <label for="create-source">Zrodlo</label>
+              <input id="create-source" type="text" value="recznie" />
+            </div>
+          </div>
+
+          <div class="inline-actions">
+            <button class="secondary" id="save-create-visit" type="button">Dodaj do workflow</button>
+            <button class="ghost" id="cancel-create-visit" type="button">Anuluj</button>
+          </div>
+        </section>
+
+        <section class="view active" id="dashboard-view">
+          <div class="panel day-context-panel" id="day-context"></div>
+          <section class="panel day-schedule-panel">
+            <div class="panel-header">
+              <div>
+                  <p class="panel-label">Plan dnia</p>
+                  <h3>Lista pracy</h3>
+              </div>
+              <button class="ghost" id="toggle-followup" type="button">Pokaz domkniecia</button>
+            </div>
+
+            <div class="day-schedule" id="day-schedule"></div>
+          </section>
+
+          <section class="panel inbox-panel" id="day-followup-panel" hidden>
+            <div class="panel-header">
+              <div>
+                <p class="panel-label">Rzeczy do domkniecia</p>
+                <h3>Drugie spojrzenie na dzien</h3>
+              </div>
+            </div>
+
+            <div class="dashboard-layout">
+              <section>
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="panel-label">Wybrana wizyta</p>
+                  </div>
+                </div>
+                <ul class="checklist" id="visit-checklist"></ul>
+                <div class="next-step-card" id="next-step-card"></div>
+              </section>
+
+              <section>
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="panel-label">Inbox operacyjny</p>
+                  </div>
+                </div>
+                <div class="inbox-list" id="inbox-list"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="visit-view">
+          <div class="detail-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Sesja</p>
+                  <h3 id="visit-heading"></h3>
+                </div>
+                <span class="badge warning" id="visit-status-badge">wymaga akcji</span>
+              </div>
+
+              <div class="form-section">
+                <label for="visit-notes">Notatki z sesji</label>
+                <textarea id="visit-notes" rows="6"></textarea>
+              </div>
+
+              <div class="form-section">
+                <label for="visit-summary">Podsumowanie wizyty</label>
+                <textarea id="visit-summary" rows="5"></textarea>
+                <div class="inline-actions">
+                  <button class="secondary" id="ai-summary" type="button">Podsumuj AI</button>
+                  <button class="ghost" id="visit-template" type="button">Wstaw szablon</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Kontynuacja</p>
+                  <h3>Nastepna wizyta</h3>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <label>Status</label>
+                <div class="choice-row">
+                  <button class="choice" data-choice-group="next-status" data-choice-value="scheduled" type="button">Potwierdzona</button>
+                  <button class="choice" data-choice-group="next-status" data-choice-value="to_schedule" type="button">Do ustalenia</button>
+                  <button class="choice" data-choice-group="next-status" data-choice-value="none" type="button">Brak kontynuacji</button>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <label for="visit-next-planned">Ustalony termin roboczy</label>
+                <input id="visit-next-planned" type="text" />
+              </div>
+
+              <div class="form-section">
+                <label for="visit-next-note">Co trzeba zrobic dalej</label>
+                <textarea id="visit-next-note" rows="4"></textarea>
+              </div>
+
+              <div class="inline-actions">
+                <button class="secondary" id="save-visit" type="button">Zapisz jako robocze</button>
+                <button class="primary" id="close-visit" type="button">Zamknij wizyte</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="patients-view">
+          <div class="patients-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Baza pacjentow</p>
+                  <h3>Lista pacjentow</h3>
+                </div>
+              </div>
+
+              <div class="patient-list" id="patient-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Karta pacjenta</p>
+                  <h3 id="patient-heading"></h3>
+                </div>
+                <span class="badge neutral" id="patient-badge">aktywny</span>
+              </div>
+
+              <div class="patient-summary-grid" id="patient-summary-grid"></div>
+
+              <div class="panel-header small-gap">
+                <div>
+                  <p class="panel-label">Historia wizyt</p>
+                </div>
+              </div>
+
+              <div class="patient-history" id="patient-history"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="imports-view">
+          <div class="imports-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Importy zewnetrzne</p>
+                  <h3>Batch importow</h3>
+                </div>
+              </div>
+
+              <div class="import-batches" id="import-batches"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Szczegoly batcha</p>
+                  <h3 id="import-heading"></h3>
+                </div>
+              </div>
+
+              <div class="patient-summary-grid" id="import-summary-grid"></div>
+              <div class="import-rows" id="import-rows"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="billing-view">
+          <div class="grid billing-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Rozliczenie po sesji</p>
+                  <h3>Status platnosci</h3>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <label for="billing-amount">Kwota</label>
+                <input id="billing-amount" type="number" min="0" step="1" />
+              </div>
+
+              <div class="form-section">
+                <label>Status</label>
+                <div class="choice-row">
+                  <button class="choice" data-choice-group="payment-status" data-choice-value="paid" type="button">Zaplacone</button>
+                  <button class="choice" data-choice-group="payment-status" data-choice-value="pending" type="button">Oczekuje</button>
+                  <button class="choice" data-choice-group="payment-status" data-choice-value="partial" type="button">Czesciowo</button>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <label>Forma platnosci</label>
+                <div class="choice-row">
+                  <button class="choice" data-choice-group="payment-method" data-choice-value="transfer" type="button">Przelew</button>
+                  <button class="choice" data-choice-group="payment-method" data-choice-value="cash" type="button">Gotowka</button>
+                  <button class="choice" data-choice-group="payment-method" data-choice-value="blik" type="button">BLIK</button>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <label>Dokument sprzedazy</label>
+                <div class="choice-row">
+                  <button class="choice" data-choice-group="payment-document" data-choice-value="receipt" type="button">Paragon</button>
+                  <button class="choice" data-choice-group="payment-document" data-choice-value="invoice" type="button">Faktura</button>
+                  <button class="choice" data-choice-group="payment-document" data-choice-value="none" type="button">Bez dokumentu</button>
+                </div>
+              </div>
+
+              <div class="inline-actions">
+                <button class="secondary" id="mark-paid" type="button">Oznacz jako zaplacone</button>
+                <button class="primary" id="issue-document" type="button">Wystaw dokument</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Do dopilnowania</p>
+                  <h3>Zalegle platnosci</h3>
+                </div>
+              </div>
+
+              <div class="payment-list" id="payment-list"></div>
+
+              <div class="stats-table compact" id="billing-summary"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="stats-view">
+          <div class="grid hero-grid" id="stats-metrics"></div>
+
+          <div class="stats-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label">Miesiac</p>
+                  <h3>Najwazniejsze liczby</h3>
+                </div>
+              </div>
+
+              <div class="stats-table" id="stats-table"></div>
+            </section>
+
+            <section class="panel accent-panel">
+              <p class="panel-label">Insight</p>
+              <h3>Wolne sloty tygodnia</h3>
+              <p id="insight-copy"></p>
+              <button class="primary" type="button">Zobacz rekomendacje</button>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>

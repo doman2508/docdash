@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Logowanie - DocDash</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-card">
+        <div class="brand login-brand">
+          <div class="brand-mark">DD</div>
+          <div>
+            <p class="eyebrow">Bezpieczny dostep</p>
+            <h1>DocDash</h1>
+          </div>
+        </div>
+
+        <div>
+          <p class="panel-label">Logowanie</p>
+          <h2>Wejdz do gabinetu</h2>
+          <p class="login-copy">
+            Dane pacjentow nie powinny wisiec publicznie w internecie. Najpierw logowanie, potem workflow.
+          </p>
+        </div>
+
+        <form class="login-form" id="login-form">
+          <div class="form-section">
+            <label for="login-username">Login</label>
+            <input id="login-username" name="username" type="text" autocomplete="username" required />
+          </div>
+
+          <div class="form-section">
+            <label for="login-password">Haslo</label>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+          </div>
+
+          <button class="primary" type="submit">Zaloguj</button>
+          <p class="save-status" id="login-status" data-state="idle"></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="/login.js"></script>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+node_modules/
+data/store.json
+.env
+.env.*
+.railway/
+*.log
+npm-debug.log*
+*.xlsx
