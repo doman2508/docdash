@@ -350,11 +350,19 @@ function buildImportedVisit(importRow) {
   };
 }
 
-function collectRequestBody(req) {
+function collectRequestBody(req, maxBytes = 5 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let receivedBytes = 0;
 
     req.on("data", (chunk) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > maxBytes) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+        return;
+      }
+
       body += chunk.toString();
     });
 
@@ -373,6 +381,18 @@ function collectRequestBody(req) {
 
     req.on("error", reject);
   });
+}
+
+function validateStorePayload(payload) {
+  return Boolean(
+    payload &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      payload.meta &&
+      typeof payload.meta === "object" &&
+      Array.isArray(payload.visits) &&
+      Array.isArray(payload.imports)
+  );
 }
 
 const server = http.createServer(async (req, res) => {
@@ -443,6 +463,42 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === "/api/bootstrap" && req.method === "GET") {
     sendJson(res, 200, readData());
+    return;
+  }
+
+  if (pathname === "/api/data/export" && req.method === "GET") {
+    const data = readData();
+    const filename = `docdash-store-${new Date().toISOString().slice(0, 10)}.json`;
+
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`
+    });
+    res.end(JSON.stringify(data, null, 2));
+    return;
+  }
+
+  if (pathname === "/api/data/import" && req.method === "POST") {
+    try {
+      const payload = await collectRequestBody(req, 10 * 1024 * 1024);
+
+      if (!validateStorePayload(payload)) {
+        sendJson(res, 400, { error: "Invalid DocDash store payload" });
+        return;
+      }
+
+      payload.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      writeData(payload);
+      sendJson(res, 200, {
+        ok: true,
+        visits: payload.visits.length,
+        imports: payload.imports.length,
+        lastUpdated: payload.meta.lastUpdated
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to import DocDash store" });
+    }
+
     return;
   }
 

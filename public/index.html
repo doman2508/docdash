@@ -47,12 +47,40 @@
           </div>
           <div class="hero-actions">
             <button class="secondary" type="button">Import z ZL</button>
+            <button class="secondary" id="open-data-tools" type="button">Dane</button>
             <button class="primary" id="open-create-visit" type="button">Nowa wizyta</button>
             <button class="ghost" id="logout-button" type="button">Wyloguj</button>
           </div>
         </header>
 
         <div class="save-status" id="save-status" data-state="idle"></div>
+
+        <section class="panel data-tools-panel" id="data-tools-panel" hidden>
+          <div class="panel-header">
+            <div>
+              <p class="panel-label">Dane aplikacji</p>
+              <h3>Import i backup store.json</h3>
+            </div>
+          </div>
+
+          <p class="data-tools-copy">
+            Ten plik zawiera realne dane pacjentow. Nie wrzucamy go do GitHuba, tylko importujemy po loginie
+            bezposrednio do zapisanej przestrzeni Railway.
+          </p>
+
+          <div class="data-tools-grid">
+            <div class="form-section">
+              <label for="data-store-file">Lokalny plik store.json</label>
+              <input id="data-store-file" type="file" accept="application/json,.json" />
+            </div>
+
+            <div class="inline-actions data-tools-actions">
+              <button class="primary" id="import-data-store" type="button">Importuj dane</button>
+              <button class="secondary" id="export-data-store" type="button">Pobierz backup</button>
+              <button class="ghost" id="close-data-tools" type="button">Zamknij</button>
+            </div>
+          </div>
+        </section>
 
         <section class="panel create-visit-panel" id="create-visit-panel" hidden>
           <div class="panel-header">

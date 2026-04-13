@@ -198,6 +198,25 @@ p {
   margin-bottom: 16px;
 }
 
+.data-tools-panel {
+  margin-bottom: 16px;
+}
+
+.data-tools-copy {
+  max-width: 780px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.data-tools-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.data-tools-actions {
+  margin-top: 0;
+}
+
 .create-visit-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -42,6 +42,8 @@ const navButtons = document.querySelectorAll(".nav-link");
 const viewPanels = document.querySelectorAll(".view");
 const saveStatusEl = document.getElementById("save-status");
 const logoutButton = document.getElementById("logout-button");
+const dataToolsPanel = document.getElementById("data-tools-panel");
+const dataStoreFileInput = document.getElementById("data-store-file");
 
 function formatCurrency(value) {
   return `${Number(value || 0).toLocaleString("pl-PL")} zl`;
@@ -837,8 +839,7 @@ async function promoteImportRow(importId, rowId) {
     Object.assign(row, updatedRow);
   }
 
-  const refresh = await fetch("/api/bootstrap");
-  state.data = await refresh.json();
+  await refreshBootstrapData();
   state.selectedImportId = importId;
   state.selectedPatientName = updatedRow.patientName || state.selectedPatientName;
   state.selectedVisitId = updatedRow.linkedVisitId || state.selectedVisitId;
@@ -855,6 +856,86 @@ function setCreateVisitPanelVisibility(isVisible) {
     document.getElementById("create-date-label").value = state.activeDateKey || getCurrentDateKey();
     document.getElementById("create-time").value = "";
     document.getElementById("create-patient-name").focus();
+  }
+}
+
+function setDataToolsPanelVisibility(isVisible) {
+  dataToolsPanel.hidden = !isVisible;
+
+  if (!isVisible) {
+    dataStoreFileInput.value = "";
+  }
+}
+
+async function refreshBootstrapData() {
+  const response = await fetch("/api/bootstrap");
+
+  if (response.status === 401) {
+    window.location.href = "/login.html";
+    return false;
+  }
+
+  state.data = await response.json();
+  return true;
+}
+
+function readJsonFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      try {
+        resolve(JSON.parse(reader.result));
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+function isValidStorePayload(payload) {
+  return Boolean(payload && payload.meta && Array.isArray(payload.visits) && Array.isArray(payload.imports));
+}
+
+async function importDataStore() {
+  const file = dataStoreFileInput.files?.[0];
+
+  if (!file) {
+    setSaveStatus("Wybierz plik store.json do importu.", "error");
+    return;
+  }
+
+  setSaveStatus("Wczytuje plik z danymi...", "pending");
+
+  try {
+    const payload = await readJsonFile(file);
+
+    if (!isValidStorePayload(payload)) {
+      setSaveStatus("To nie wyglada jak poprawny plik DocDash store.json.", "error");
+      return;
+    }
+
+    const response = await fetch("/api/data/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      setSaveStatus("Import danych nie powiodl sie.", "error");
+      return;
+    }
+
+    const result = await response.json();
+    await refreshBootstrapData();
+    setDataToolsPanelVisibility(false);
+    renderAll();
+    setSaveStatus(`Zaimportowano dane: ${result.visits} wizyt, ${result.imports} importow.`, "success");
+  } catch (error) {
+    setSaveStatus("Nie udalo sie odczytac pliku JSON.", "error");
   }
 }
 
@@ -887,8 +968,7 @@ async function createManualVisit() {
   }
 
   const visit = await response.json();
-  const refresh = await fetch("/api/bootstrap");
-  state.data = await refresh.json();
+  await refreshBootstrapData();
   state.selectedVisitId = visit.id;
   state.selectedPatientName = visit.patientName;
   setCreateVisitPanelVisibility(false);
@@ -1146,14 +1226,11 @@ function renderAll() {
 }
 
 async function bootstrap() {
-  const response = await fetch("/api/bootstrap");
+  const loaded = await refreshBootstrapData();
 
-  if (response.status === 401) {
-    window.location.href = "/login.html";
+  if (!loaded) {
     return;
   }
-
-  state.data = await response.json();
   state.activeDateKey = getCurrentDateKey();
   state.selectedVisitId = getActiveDateWorkflowVisits()[0]?.id || state.data.visits[0]?.id || null;
   state.selectedImportId = state.data.imports?.[0]?.id || null;
@@ -1166,6 +1243,20 @@ async function bootstrap() {
 navButtons.forEach((button) => {
   button.addEventListener("click", () => setActiveView(button.dataset.view));
 });
+
+document.getElementById("open-data-tools")?.addEventListener("click", () => {
+  setDataToolsPanelVisibility(dataToolsPanel.hidden);
+});
+
+document.getElementById("close-data-tools")?.addEventListener("click", () => {
+  setDataToolsPanelVisibility(false);
+});
+
+document.getElementById("export-data-store")?.addEventListener("click", () => {
+  window.location.href = "/api/data/export";
+});
+
+document.getElementById("import-data-store")?.addEventListener("click", importDataStore);
 
 logoutButton?.addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" });
