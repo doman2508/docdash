@@ -64,6 +64,7 @@
   "bankImports": [],
   "paymentAliases": [],
   "paymentRules": [],
+  "paymentRejectedMatches": [],
   "paymentMatches": {
     "generatedAt": null,
     "summary": {

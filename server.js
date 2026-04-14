@@ -1079,12 +1079,13 @@ function buildExternalPaymentMatch(session, method, reasons = []) {
   };
 }
 
-function alternativePaymentCandidates(session, transactions, usedTransactionIds, aliases = []) {
+function alternativePaymentCandidates(session, transactions, usedTransactionIds, aliases = [], rejectedPairs = new Set()) {
   const sessionDateKey = dateSortValue(session.dateLabel);
 
   return transactions
     .filter((transaction) => !usedTransactionIds.has(transaction.id))
     .filter((transaction) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+    .filter((transaction) => !isPaymentRejected(rejectedPairs, transaction, session))
     .map((transaction) => {
       const details = scoreTransactionForSession(transaction, session, aliases);
       const identity = patientIdentityScore(session.patientName, transaction, aliases);
@@ -1139,11 +1140,26 @@ function findPaymentRule(session, rules = []) {
   ));
 }
 
+function rejectedPaymentKey(transactionId, targetId) {
+  return `${transactionId || ""}|${targetId || ""}`;
+}
+
+function rejectedPaymentSet(store) {
+  return new Set(
+    (store.paymentRejectedMatches || []).map((item) => rejectedPaymentKey(item.transactionId, item.targetId))
+  );
+}
+
+function isPaymentRejected(rejectedPairs, transaction, session) {
+  return rejectedPairs.has(rejectedPaymentKey(transaction?.id, session?.id));
+}
+
 function generatePaymentMatches(store) {
   const sessions = collectSessions(store);
   const transactions = collectTransactions(store);
   const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
   const paymentRules = Array.isArray(store.paymentRules) ? store.paymentRules : [];
+  const rejectedPairs = rejectedPaymentSet(store);
   const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
   const confirmedSessionIds = new Set(confirmedMatches.flatMap((match) => (match.targets || []).map((target) => target.id)));
   const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
@@ -1178,6 +1194,7 @@ function generatePaymentMatches(store) {
     availableSessions
       .filter((session) => !usedSessionIds.has(session.id))
       .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+      .filter((session) => !isPaymentRejected(rejectedPairs, transaction, session))
       .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 24)
       .forEach((session) => {
         const details = scoreTransactionForSession(transaction, session, aliases);
@@ -1219,6 +1236,7 @@ function generatePaymentMatches(store) {
     const patientGroups = new Map();
     availableSessions
       .filter((session) => !usedSessionIds.has(session.id))
+      .filter((session) => !isPaymentRejected(rejectedPairs, transaction, session))
       .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 24)
       .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) >= 0)
       .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) <= 45)
@@ -1285,7 +1303,7 @@ function generatePaymentMatches(store) {
             amount: session.amount
           }
         ],
-        alternatives: alternativePaymentCandidates(session, transactions, usedTransactionIds, aliases),
+        alternatives: alternativePaymentCandidates(session, transactions, usedTransactionIds, aliases, rejectedPairs),
         delta: Number(session.amount || 0)
       });
     });
@@ -1558,6 +1576,43 @@ function confirmExternalPayment(store, targetId, method, rememberPatient = false
   return { match, rulesAdded };
 }
 
+function rejectPaymentMatchInStore(store, match) {
+  if (!match?.transaction?.id || !(match.targets || []).length) {
+    return 0;
+  }
+
+  if (!Array.isArray(store.paymentRejectedMatches)) {
+    store.paymentRejectedMatches = [];
+  }
+
+  const existing = rejectedPaymentSet(store);
+  const rejectedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
+  let rejected = 0;
+
+  (match.targets || []).forEach((target) => {
+    const key = rejectedPaymentKey(match.transaction.id, target.id);
+    if (existing.has(key)) {
+      return;
+    }
+
+    store.paymentRejectedMatches.push({
+      id: `reject-${slugify(`${match.transaction.id}-${target.id}`)}`,
+      matchId: match.id,
+      transactionId: match.transaction.id,
+      targetId: target.id,
+      patientName: target.patientName,
+      dateLabel: target.dateLabel,
+      time: target.time,
+      amount: target.amount,
+      rejectedAt
+    });
+    existing.add(key);
+    rejected += 1;
+  });
+
+  return rejected;
+}
+
 function confirmPaymentMatchInStore(store, match) {
   if (!match || !match.transaction || match.status === "missing" || match.status === "confirmed") {
     return false;
@@ -1807,6 +1862,30 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { ok: true, aliasesAdded, paymentMatches: data.paymentMatches });
     } catch (error) {
       sendJson(res, 400, { error: "Unable to confirm payment match" });
+    }
+
+    return;
+  }
+
+  if (pathname.startsWith("/api/reconciliation/matches/") && pathname.endsWith("/reject") && req.method === "POST") {
+    try {
+      const segments = pathname.split("/").filter(Boolean);
+      const matchId = decodeURIComponent(segments[3]);
+      const data = readData();
+      const match = data.paymentMatches?.matches?.find((item) => item.id === matchId);
+
+      if (!match || !match.transaction || match.status === "missing" || match.status === "confirmed") {
+        sendJson(res, 404, { error: "Payment match not found" });
+        return;
+      }
+
+      const rejected = rejectPaymentMatchInStore(data, match);
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, { ok: true, rejected, paymentMatches: data.paymentMatches });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to reject payment match" });
     }
 
     return;

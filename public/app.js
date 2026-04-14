@@ -886,6 +886,7 @@ function renderReconciliation() {
           ? `
             <button class="primary confirm-payment-match" type="button" data-match-id="${match.id}">Potwierdz</button>
             <button class="secondary remember-payer-match" type="button" data-match-id="${match.id}">Potwierdz + zapamietaj platnika</button>
+            <button class="ghost reject-payment-match" type="button" data-match-id="${match.id}">To nie ta platnosc</button>
           `
           : paymentExceptionActions;
 
@@ -1183,6 +1184,24 @@ async function confirmPaymentMatch(matchId, rememberPayer = false) {
       : "Platnosc potwierdzona i przypisana do sesji.",
     "success"
   );
+}
+
+async function rejectPaymentMatch(matchId) {
+  setSaveStatus("Odrzucam bledne dopasowanie...", "pending");
+
+  const response = await fetch(`/api/reconciliation/matches/${encodeURIComponent(matchId)}/reject`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie odrzucic dopasowania.", "error");
+    return;
+  }
+
+  await refreshBootstrapData();
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus("Dopasowanie odrzucone. Ta para nie bedzie juz proponowana.", "success");
 }
 
 async function confirmManualPaymentMatch(targetId, transactionId) {
@@ -1543,6 +1562,12 @@ function attachActions() {
   document.querySelectorAll(".remember-payer-match").forEach((button) => {
     button.onclick = async () => {
       await confirmPaymentMatch(button.dataset.matchId, true);
+    };
+  });
+
+  document.querySelectorAll(".reject-payment-match").forEach((button) => {
+    button.onclick = async () => {
+      await rejectPaymentMatch(button.dataset.matchId);
     };
   });
 
