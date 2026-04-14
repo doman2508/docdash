@@ -804,8 +804,12 @@ function patientTokenScore(patientName, transaction) {
   const patientTokens = normalizeSearchValue(patientName)
     .split(" ")
     .filter((token) => token.length >= 3);
-  const transactionText = normalizeSearchValue(`${transaction.counterparty} ${transaction.title}`);
-  const matchedTokens = patientTokens.filter((token) => transactionText.includes(token));
+  const transactionTokens = new Set(
+    normalizeSearchValue(`${transaction.counterparty} ${transaction.title}`)
+      .split(" ")
+      .filter(Boolean)
+  );
+  const matchedTokens = patientTokens.filter((token) => transactionTokens.has(token));
 
   if (patientTokens.length && matchedTokens.length === patientTokens.length) {
     return 45;
@@ -920,6 +924,7 @@ function generatePaymentMatches(store) {
     const candidates = availableSessions
       .filter((session) => !usedSessionIds.has(session.id))
       .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+      .filter((session) => patientTokenScore(session.patientName, transaction) >= 24)
       .map((session) => ({ session, score: scoreTransactionForSession(transaction, session) }))
       .filter((candidate) => candidate.score >= 52)
       .sort((left, right) => right.score - left.score);
