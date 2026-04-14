@@ -851,8 +851,28 @@ function renderReconciliation() {
       const transactionCopy = match.transaction
         ? `${match.transaction.transactionDate} - ${match.transaction.counterparty}<br />${match.transaction.title || "bez tytulu"}`
         : "Nie znaleziono pasujacego wplywu";
+      const reasonsCopy = (match.reasons || [])
+        .slice(0, 5)
+        .map((reason) => `<span>${reason}</span>`)
+        .join("");
+      const alternativesCopy = (match.alternatives || [])
+        .slice(0, 3)
+        .map((candidate) => `
+          <button class="ghost manual-payment-match" type="button" data-target-id="${match.targets?.[0]?.id || ""}" data-transaction-id="${candidate.id}">
+            <strong>${candidate.transactionDate} - ${candidate.counterparty} - ${formatCurrency(candidate.amount)}</strong>
+            <span>${candidate.title || "bez tytulu"}</span>
+          </button>
+        `)
+        .join("");
       const badgeClass =
         match.status === "confirmed" ? "success" : match.status === "missing" ? "warning" : match.confidence === "pewne" ? "success" : "neutral";
+      const actionsCopy =
+        match.transaction && match.status !== "confirmed"
+          ? `
+            <button class="primary confirm-payment-match" type="button" data-match-id="${match.id}">Potwierdz</button>
+            <button class="secondary remember-payer-match" type="button" data-match-id="${match.id}">Potwierdz + zapamietaj platnika</button>
+          `
+          : "";
 
       return `
         <article class="reconciliation-item ${match.status}">
@@ -862,15 +882,13 @@ function renderReconciliation() {
           </div>
           <div class="reconciliation-transaction">
             <span>${transactionCopy}</span>
+            ${reasonsCopy ? `<div class="reconciliation-signals">${reasonsCopy}</div>` : ""}
+            ${alternativesCopy ? `<div class="manual-payment-options"><small>Mozliwe wplywy do recznego podpiecia:</small>${alternativesCopy}</div>` : ""}
           </div>
           <div class="reconciliation-result">
             <span class="badge ${badgeClass}">${match.status === "confirmed" ? "potwierdzone" : match.confidence}</span>
             <strong>${match.transaction ? formatSignedCurrency(match.delta) : formatCurrency(match.delta)}</strong>
-            ${
-              match.transaction && match.status !== "confirmed"
-                ? `<button class="primary confirm-payment-match" type="button" data-match-id="${match.id}">Potwierdz</button>`
-                : ""
-            }
+            ${actionsCopy}
           </div>
         </article>
       `;
@@ -1116,11 +1134,13 @@ async function runReconciliationImport() {
   }
 }
 
-async function confirmPaymentMatch(matchId) {
-  setSaveStatus("Potwierdzam platnosc...", "pending");
+async function confirmPaymentMatch(matchId, rememberPayer = false) {
+  setSaveStatus(rememberPayer ? "Potwierdzam platnosc i zapamietuje platnika..." : "Potwierdzam platnosc...", "pending");
 
   const response = await fetch(`/api/reconciliation/matches/${encodeURIComponent(matchId)}/confirm`, {
-    method: "POST"
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rememberPayer })
   });
 
   if (!response.ok) {
@@ -1128,10 +1148,42 @@ async function confirmPaymentMatch(matchId) {
     return;
   }
 
+  const result = await response.json();
   await refreshBootstrapData();
   renderAll();
   setActiveView("billing");
-  setSaveStatus("Platnosc potwierdzona i przypisana do sesji.", "success");
+  setSaveStatus(
+    rememberPayer && result.aliasesAdded
+      ? `Platnosc potwierdzona. Zapamietano ${result.aliasesAdded} powiazanie platnika.`
+      : "Platnosc potwierdzona i przypisana do sesji.",
+    "success"
+  );
+}
+
+async function confirmManualPaymentMatch(targetId, transactionId) {
+  setSaveStatus("Podpinam recznie wplyw i zapamietuje platnika...", "pending");
+
+  const response = await fetch("/api/reconciliation/manual-confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetId, transactionId, rememberPayer: true })
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie recznie podpiac wplywu.", "error");
+    return;
+  }
+
+  const result = await response.json();
+  await refreshBootstrapData();
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus(
+    result.aliasesAdded
+      ? `Wplyw podpiety. Zapamietano ${result.aliasesAdded} powiazanie platnika.`
+      : "Wplyw podpiety do sesji.",
+    "success"
+  );
 }
 
 async function confirmConfidentPaymentMatches() {
@@ -1431,6 +1483,18 @@ function attachActions() {
   document.querySelectorAll(".confirm-payment-match").forEach((button) => {
     button.onclick = async () => {
       await confirmPaymentMatch(button.dataset.matchId);
+    };
+  });
+
+  document.querySelectorAll(".remember-payer-match").forEach((button) => {
+    button.onclick = async () => {
+      await confirmPaymentMatch(button.dataset.matchId, true);
+    };
+  });
+
+  document.querySelectorAll(".manual-payment-match").forEach((button) => {
+    button.onclick = async () => {
+      await confirmManualPaymentMatch(button.dataset.targetId, button.dataset.transactionId);
     };
   });
 }

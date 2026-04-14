@@ -800,62 +800,170 @@ function collectTransactions(store) {
   );
 }
 
-function patientTokenScore(patientName, transaction) {
-  const patientTokens = normalizeSearchValue(patientName)
+const PAYMENT_ALIAS_STOPWORDS = new Set([
+  "ul",
+  "ulica",
+  "al",
+  "aleja",
+  "os",
+  "m",
+  "lok",
+  "lokal",
+  "przelew",
+  "srodkow",
+  "srodek",
+  "sesja",
+  "sesje",
+  "wizyta",
+  "za",
+  "od",
+  "do",
+  "warszawa"
+]);
+
+function searchTokens(text, minLength = 3) {
+  return normalizeSearchValue(text)
     .split(" ")
-    .filter((token) => token.length >= 3);
-  const transactionTokens = new Set(
-    normalizeSearchValue(`${transaction.counterparty} ${transaction.title}`)
-      .split(" ")
-      .filter(Boolean)
-  );
-  const matchedTokens = patientTokens.filter((token) => transactionTokens.has(token));
-
-  if (patientTokens.length && matchedTokens.length === patientTokens.length) {
-    return 45;
-  }
-
-  if (matchedTokens.length >= 2) {
-    return 35;
-  }
-
-  if (matchedTokens.length === 1) {
-    return 24;
-  }
-
-  return 0;
+    .filter((token) => token.length >= minLength);
 }
 
-function scoreTransactionForSession(transaction, session) {
+function transactionTokenSet(transaction) {
+  return new Set(searchTokens(`${transaction.counterparty} ${transaction.title}`, 1));
+}
+
+function payerAliasTokens(text) {
+  return searchTokens(text)
+    .filter((token) => !PAYMENT_ALIAS_STOPWORDS.has(token))
+    .filter((token) => !/^\d+$/.test(token))
+    .slice(0, 3);
+}
+
+function aliasMatchesTransaction(alias, transactionTokens) {
+  const aliasTokens = Array.isArray(alias.payerTokens) && alias.payerTokens.length
+    ? alias.payerTokens
+    : payerAliasTokens(alias.payerName || alias.payerKey);
+  const matchedTokens = aliasTokens.filter((token) => transactionTokens.has(token));
+
+  if (aliasTokens.length >= 2) {
+    return matchedTokens.length >= 2;
+  }
+
+  return aliasTokens.length === 1 && matchedTokens.length === 1;
+}
+
+function patientIdentityScore(patientName, transaction, aliases = []) {
+  const patientTokens = searchTokens(patientName);
+  const transactionTokens = transactionTokenSet(transaction);
+  const matchedTokens = patientTokens.filter((token) => transactionTokens.has(token));
   let score = 0;
+  const reasons = [];
+
+  if (patientTokens.length && matchedTokens.length === patientTokens.length) {
+    score = 45;
+    reasons.push("platnik pasuje do pacjenta");
+  } else if (matchedTokens.length >= 2) {
+    score = 35;
+    reasons.push("znaleziono imie i nazwisko pacjenta");
+  } else if (matchedTokens.length === 1) {
+    score = 24;
+    reasons.push("znaleziono fragment danych pacjenta");
+  }
+
+  const patientKey = normalizeSearchValue(patientName);
+  const alias = (aliases || []).find((item) => (
+    item.patientKey === patientKey && aliasMatchesTransaction(item, transactionTokens)
+  ));
+
+  if (alias && score < 48) {
+    score = 48;
+    reasons.unshift(`slownik platnika: ${alias.payerName}`);
+  }
+
+  return { score, reasons };
+}
+
+function patientTokenScore(patientName, transaction, aliases = []) {
+  return patientIdentityScore(patientName, transaction, aliases).score;
+}
+
+function titleDateHints(transaction) {
+  const text = String(transaction?.title || "");
+  const transactionDate = parseDateValue(transaction?.transactionDate);
+  const fallbackYear = transactionDate ? transactionDate.getUTCFullYear() : new Date().getFullYear();
+  const hints = new Set();
+  const pattern = /(^|[^0-9])(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?(?=$|[^0-9])/g;
+  let match = pattern.exec(text);
+
+  while (match) {
+    const day = Number(match[2]);
+    const month = Number(match[3]);
+    const rawYear = match[4];
+    const year = rawYear ? (rawYear.length === 2 ? 2000 + Number(rawYear) : Number(rawYear)) : fallbackYear;
+
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
+      hints.add(year * 10000 + month * 100 + day);
+    }
+
+    match = pattern.exec(text);
+  }
+
+  return Array.from(hints);
+}
+
+function uniqueReasons(reasons) {
+  return Array.from(new Set(reasons.filter(Boolean)));
+}
+
+function scoreTransactionForSession(transaction, session, aliases = []) {
+  let score = 0;
+  const reasons = [];
 
   if (Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01) {
     score += 30;
+    reasons.push("kwota zgodna");
   }
 
-  score += patientTokenScore(session.patientName, transaction);
+  const identity = patientIdentityScore(session.patientName, transaction, aliases);
+  score += identity.score;
+  reasons.push(...identity.reasons);
+
+  const hints = titleDateHints(transaction);
+  const sessionDateKey = dateSortValue(session.dateLabel);
+  if (hints.length && sessionDateKey) {
+    if (hints.includes(sessionDateKey)) {
+      score += 28;
+      reasons.push("tytul wskazuje date sesji");
+    } else {
+      score -= 30;
+      reasons.push("tytul wskazuje inna date");
+    }
+  }
 
   const distance = dateDistanceDays(session.dateLabel, transaction.transactionDate);
   if (distance === 0) {
     score += 25;
+    reasons.push("wplata w dniu sesji");
   } else if (distance > 0 && distance <= 3) {
     score += 20;
+    reasons.push(`wplata ${distance} dni po sesji`);
   } else if (distance > 0 && distance <= 10) {
     score += 12;
+    reasons.push(`wplata ${distance} dni po sesji`);
   } else if (distance > 0 && distance <= 31) {
     score += 6;
+    reasons.push(`wplata ${distance} dni po sesji`);
   } else if (distance < 0 && distance >= -2) {
     score += 4;
+    reasons.push(`wplata ${Math.abs(distance)} dni przed sesja`);
   } else {
-    score -= 15;
+    score -= 35;
+    reasons.push("data wplaty daleko od sesji");
   }
 
-  const dateParts = String(session.dateLabel || "").split(".");
-  if (dateParts.length >= 2 && normalizeSearchValue(transaction.title).includes(`${Number(dateParts[0])} ${Number(dateParts[1])}`)) {
-    score += 4;
-  }
-
-  return Math.max(0, Math.min(100, score));
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    reasons: uniqueReasons(reasons)
+  };
 }
 
 function confidenceForScore(score) {
@@ -870,7 +978,7 @@ function confidenceForScore(score) {
   return "niskie";
 }
 
-function buildMatch(transaction, sessions, score, kind = "single") {
+function buildMatch(transaction, sessions, score, kind = "single", reasons = []) {
   const totalAmount = sessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
   const targetSlug = sessions.map((session) => slugify(session.id)).join("-");
 
@@ -880,6 +988,7 @@ function buildMatch(transaction, sessions, score, kind = "single") {
     status: "suggested",
     confidence: confidenceForScore(score),
     score,
+    reasons: uniqueReasons(reasons),
     transaction: {
       id: transaction.id,
       transactionNo: transaction.transactionNo,
@@ -905,9 +1014,59 @@ function buildMatch(transaction, sessions, score, kind = "single") {
   };
 }
 
+function alternativePaymentCandidates(session, transactions, usedTransactionIds, aliases = []) {
+  const sessionDateKey = dateSortValue(session.dateLabel);
+
+  return transactions
+    .filter((transaction) => !usedTransactionIds.has(transaction.id))
+    .filter((transaction) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+    .map((transaction) => {
+      const details = scoreTransactionForSession(transaction, session, aliases);
+      const distance = dateDistanceDays(session.dateLabel, transaction.transactionDate);
+      const hints = titleDateHints(transaction);
+      const titleDateMatch = sessionDateKey && hints.includes(sessionDateKey);
+      const nearby = distance >= -3 && distance <= 7;
+
+      if (!titleDateMatch && !nearby) {
+        return null;
+      }
+
+      return {
+        transaction,
+        score: details.score + (titleDateMatch ? 20 : 0) + (Math.abs(distance) <= 3 ? 10 : 0),
+        distance: Math.abs(distance),
+        reasons: uniqueReasons([
+          "kandydat do recznej oceny",
+          ...details.reasons
+        ])
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.distance - right.distance;
+    })
+    .slice(0, 3)
+    .map((candidate) => ({
+      id: candidate.transaction.id,
+      transactionNo: candidate.transaction.transactionNo,
+      transactionDate: candidate.transaction.transactionDate,
+      counterparty: candidate.transaction.counterparty,
+      title: candidate.transaction.title,
+      amount: candidate.transaction.amount,
+      currency: candidate.transaction.currency,
+      score: Math.max(0, Math.min(100, candidate.score)),
+      reasons: candidate.reasons
+    }));
+}
+
 function generatePaymentMatches(store) {
   const sessions = collectSessions(store);
   const transactions = collectTransactions(store);
+  const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
   const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
   const confirmedSessionIds = new Set(confirmedMatches.flatMap((match) => (match.targets || []).map((target) => target.id)));
   const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
@@ -916,28 +1075,47 @@ function generatePaymentMatches(store) {
   const usedSessionIds = new Set(confirmedSessionIds);
   const usedTransactionIds = new Set(confirmedTransactionIds);
 
+  const singleCandidates = [];
   transactions.forEach((transaction) => {
     if (usedTransactionIds.has(transaction.id)) {
       return;
     }
 
-    const candidates = availableSessions
+    availableSessions
       .filter((session) => !usedSessionIds.has(session.id))
       .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
-      .filter((session) => patientTokenScore(session.patientName, transaction) >= 24)
-      .map((session) => ({ session, score: scoreTransactionForSession(transaction, session) }))
-      .filter((candidate) => candidate.score >= 52)
-      .sort((left, right) => right.score - left.score);
-
-    const best = candidates[0];
-    if (!best) {
-      return;
-    }
-
-    matches.push(buildMatch(transaction, [best.session], best.score));
-    usedTransactionIds.add(transaction.id);
-    usedSessionIds.add(best.session.id);
+      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 24)
+      .forEach((session) => {
+        const details = scoreTransactionForSession(transaction, session, aliases);
+        if (details.score >= 52) {
+          singleCandidates.push({
+            transaction,
+            session,
+            score: details.score,
+            reasons: details.reasons,
+            distance: Math.abs(dateDistanceDays(session.dateLabel, transaction.transactionDate))
+          });
+        }
+      });
   });
+
+  singleCandidates
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.distance - right.distance;
+    })
+    .forEach((candidate) => {
+      if (usedTransactionIds.has(candidate.transaction.id) || usedSessionIds.has(candidate.session.id)) {
+        return;
+      }
+
+      matches.push(buildMatch(candidate.transaction, [candidate.session], candidate.score, "single", candidate.reasons));
+      usedTransactionIds.add(candidate.transaction.id);
+      usedSessionIds.add(candidate.session.id);
+    });
 
   transactions.forEach((transaction) => {
     if (usedTransactionIds.has(transaction.id)) {
@@ -947,7 +1125,7 @@ function generatePaymentMatches(store) {
     const patientGroups = new Map();
     availableSessions
       .filter((session) => !usedSessionIds.has(session.id))
-      .filter((session) => patientTokenScore(session.patientName, transaction) >= 24)
+      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 24)
       .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) >= 0)
       .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) <= 45)
       .forEach((session) => {
@@ -969,8 +1147,13 @@ function generatePaymentMatches(store) {
         sum = Number((sum + Number(sortedGroup[index].amount || 0)).toFixed(2));
 
         if (Math.abs(sum - Number(transaction.amount)) < 0.01 && targetSessions.length > 1) {
-          const score = Math.min(96, 48 + patientTokenScore(targetSessions[0].patientName, transaction) + 8);
-          matches.push(buildMatch(transaction, targetSessions, score, "group"));
+          const identity = patientIdentityScore(targetSessions[0].patientName, transaction, aliases);
+          const score = Math.min(96, 48 + identity.score + 8);
+          matches.push(buildMatch(transaction, targetSessions, score, "group", [
+            "platnosc zbiorcza",
+            "kwota zgodna z suma sesji",
+            ...identity.reasons
+          ]));
           usedTransactionIds.add(transaction.id);
           targetSessions.forEach((session) => usedSessionIds.add(session.id));
           return;
@@ -992,6 +1175,7 @@ function generatePaymentMatches(store) {
         status: "missing",
         confidence: "brak płatności",
         score: 0,
+        reasons: ["brak pasujacego wplywu"],
         transaction: null,
         targets: [
           {
@@ -1007,6 +1191,7 @@ function generatePaymentMatches(store) {
             amount: session.amount
           }
         ],
+        alternatives: alternativePaymentCandidates(session, transactions, usedTransactionIds, aliases),
         delta: Number(session.amount || 0)
       });
     });
@@ -1073,6 +1258,95 @@ function applyPaymentToTarget(store, target, transaction, matchId) {
       paymentMatchId: matchId
     };
   }
+}
+
+function addPayerAliasesFromMatch(store, match) {
+  if (!match?.transaction?.counterparty) {
+    return 0;
+  }
+
+  if (!Array.isArray(store.paymentAliases)) {
+    store.paymentAliases = [];
+  }
+
+  const payerName = String(match.transaction.counterparty || "").trim();
+  const payerKey = normalizeSearchValue(payerName);
+  const payerTokens = payerAliasTokens(payerName);
+  const createdAt = new Date().toISOString().slice(0, 16).replace("T", " ");
+  let added = 0;
+
+  if (!payerKey || !payerTokens.length) {
+    return 0;
+  }
+
+  (match.targets || []).forEach((target) => {
+    const patientName = String(target.patientName || "").trim();
+    const patientKey = normalizeSearchValue(patientName);
+    const directScore = patientIdentityScore(patientName, { ...match.transaction, title: "" }, []).score;
+
+    if (!patientKey || directScore >= 35) {
+      return;
+    }
+
+    const payerTokenKey = payerTokens.join(" ");
+    const exists = store.paymentAliases.some((alias) => (
+      alias.patientKey === patientKey &&
+      (
+        alias.payerKey === payerKey ||
+        (Array.isArray(alias.payerTokens) && alias.payerTokens.join(" ") === payerTokenKey)
+      )
+    ));
+
+    if (exists) {
+      return;
+    }
+
+    store.paymentAliases.push({
+      id: `alias-${slugify(`${patientKey}-${payerTokenKey}`)}-${Date.now()}-${added}`,
+      patientName,
+      patientKey,
+      payerName,
+      payerKey,
+      payerTokens,
+      sourceMatchId: match.id,
+      createdAt
+    });
+    added += 1;
+  });
+
+  return added;
+}
+
+function confirmManualPaymentMatch(store, targetId, transactionId, rememberPayer = true) {
+  const session = collectSessions(store).find((item) => item.id === targetId);
+  const transaction = collectTransactions(store).find((item) => item.id === transactionId);
+
+  if (!session || !transaction) {
+    return null;
+  }
+
+  const details = scoreTransactionForSession(
+    transaction,
+    session,
+    Array.isArray(store.paymentAliases) ? store.paymentAliases : []
+  );
+  const match = buildMatch(transaction, [session], Math.max(70, details.score), "manual", [
+    "recznie wybrany wplyw",
+    ...details.reasons
+  ]);
+  const aliasesAdded = rememberPayer ? addPayerAliasesFromMatch(store, match) : 0;
+
+  if (!store.paymentMatches) {
+    store.paymentMatches = { generatedAt: null, summary: {}, matches: [] };
+  }
+
+  store.paymentMatches.matches = (store.paymentMatches.matches || [])
+    .filter((item) => item.id !== match.id && item.status === "confirmed");
+
+  confirmPaymentMatchInStore(store, match);
+  store.paymentMatches.matches.push(match);
+
+  return { match, aliasesAdded };
 }
 
 function confirmPaymentMatchInStore(store, match) {
@@ -1305,6 +1579,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname.startsWith("/api/reconciliation/matches/") && pathname.endsWith("/confirm") && req.method === "POST") {
     try {
+      const payload = await collectRequestBody(req);
       const segments = pathname.split("/").filter(Boolean);
       const matchId = decodeURIComponent(segments[3]);
       const data = readData();
@@ -1315,13 +1590,45 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      const aliasesAdded = payload.rememberPayer ? addPayerAliasesFromMatch(data, match) : 0;
       confirmPaymentMatchInStore(data, match);
       data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
       generatePaymentMatches(data);
       writeData(data);
-      sendJson(res, 200, { ok: true, paymentMatches: data.paymentMatches });
+      sendJson(res, 200, { ok: true, aliasesAdded, paymentMatches: data.paymentMatches });
     } catch (error) {
       sendJson(res, 400, { error: "Unable to confirm payment match" });
+    }
+
+    return;
+  }
+
+  if (pathname === "/api/reconciliation/manual-confirm" && req.method === "POST") {
+    try {
+      const payload = await collectRequestBody(req);
+      const data = readData();
+      const result = confirmManualPaymentMatch(
+        data,
+        String(payload.targetId || ""),
+        String(payload.transactionId || ""),
+        payload.rememberPayer !== false
+      );
+
+      if (!result) {
+        sendJson(res, 404, { error: "Manual payment match not found" });
+        return;
+      }
+
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, {
+        ok: true,
+        aliasesAdded: result.aliasesAdded,
+        paymentMatches: data.paymentMatches
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to confirm manual payment match" });
     }
 
     return;

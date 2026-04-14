@@ -402,8 +402,50 @@ p {
   gap: 5px;
 }
 
+.reconciliation-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.reconciliation-signals span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(35, 83, 71, 0.08);
+  color: var(--accent);
+  font-size: 0.74rem;
+}
+
+.manual-payment-options {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.manual-payment-options small {
+  color: var(--muted);
+}
+
+.manual-payment-options button {
+  display: grid;
+  gap: 2px;
+  justify-content: flex-start;
+  padding: 7px 9px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+.manual-payment-options button span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .reconciliation-result {
   justify-items: start;
+}
+
+.reconciliation-result button {
+  padding: 8px 10px;
 }
 
 .panel {
