@@ -50,6 +50,12 @@ function formatCurrency(value) {
   return `${Number(value || 0).toLocaleString("pl-PL")} zl`;
 }
 
+function formatSignedCurrency(value) {
+  const number = Number(value || 0);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toLocaleString("pl-PL")} zl`;
+}
+
 function getCurrentDateKey() {
   const now = new Date();
   const day = now.getDate();
@@ -811,6 +817,65 @@ function renderBilling() {
     <div><span>Do odzyskania</span><strong>${formatCurrency(monthly.pending)}</strong></div>
     <div><span>Oplacone sesje</span><strong>${state.data.visits.filter((entry) => entry.payment.status === "paid").length}</strong></div>
   `;
+
+  renderReconciliation();
+}
+
+function renderReconciliation() {
+  const reconciliation = state.data.paymentMatches || { summary: {}, matches: [] };
+  const summary = reconciliation.summary || {};
+  const matches = reconciliation.matches || [];
+  const visibleMatches = matches.slice(0, 500);
+
+  document.getElementById("reconciliation-summary").innerHTML = `
+    <article><span>Sesje</span><strong>${summary.sessions || 0}</strong></article>
+    <article><span>Wplywy</span><strong>${summary.transactions || 0}</strong></article>
+    <article><span>Pewne</span><strong>${summary.confident || 0}</strong></article>
+    <article><span>Do sprawdzenia</span><strong>${summary.review || 0}</strong></article>
+    <article><span>Brak platnosci</span><strong>${summary.missing || 0}</strong></article>
+    <article><span>Potwierdzone</span><strong>${summary.confirmed || 0}</strong></article>
+  `;
+
+  if (!matches.length) {
+    document.getElementById("reconciliation-list").innerHTML = `
+      <div class="empty-state">Brak dopasowan. Zaimportuj kalendarz ZL i wplywy bankowe, zeby uruchomic walidacje platnosci.</div>
+    `;
+    return;
+  }
+
+  document.getElementById("reconciliation-list").innerHTML = visibleMatches
+    .map((match) => {
+      const targetCopy = (match.targets || [])
+        .map((target) => `${target.dateLabel} ${target.time || ""} - ${target.patientName} - ${formatCurrency(target.amount)}`)
+        .join("<br />");
+      const transactionCopy = match.transaction
+        ? `${match.transaction.transactionDate} - ${match.transaction.counterparty}<br />${match.transaction.title || "bez tytulu"}`
+        : "Nie znaleziono pasujacego wplywu";
+      const badgeClass =
+        match.status === "confirmed" ? "success" : match.status === "missing" ? "warning" : match.confidence === "pewne" ? "success" : "neutral";
+
+      return `
+        <article class="reconciliation-item ${match.status}">
+          <div class="reconciliation-target">
+            <strong>${targetCopy}</strong>
+            <span>${match.kind === "group" ? "platnosc zbiorcza" : match.kind === "missing" ? "brak dopasowania" : "pojedyncza sesja"}</span>
+          </div>
+          <div class="reconciliation-transaction">
+            <span>${transactionCopy}</span>
+          </div>
+          <div class="reconciliation-result">
+            <span class="badge ${badgeClass}">${match.status === "confirmed" ? "potwierdzone" : match.confidence}</span>
+            <strong>${match.transaction ? formatSignedCurrency(match.delta) : formatCurrency(match.delta)}</strong>
+            ${
+              match.transaction && match.status !== "confirmed"
+                ? `<button class="primary confirm-payment-match" type="button" data-match-id="${match.id}">Potwierdz</button>`
+                : ""
+            }
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderStats() {
@@ -946,6 +1011,20 @@ function readJsonFile(file) {
   });
 }
 
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",").pop() : result);
+    };
+
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 function isValidStorePayload(payload) {
   return Boolean(payload && payload.meta && Array.isArray(payload.visits) && Array.isArray(payload.imports));
 }
@@ -987,6 +1066,91 @@ async function importDataStore() {
   } catch (error) {
     setSaveStatus("Nie udalo sie odczytac pliku JSON.", "error");
   }
+}
+
+async function runReconciliationImport() {
+  const zlFile = document.getElementById("reconciliation-zl-file").files?.[0];
+  const bankFile = document.getElementById("reconciliation-bank-file").files?.[0];
+
+  if (!zlFile && !bankFile) {
+    setSaveStatus("Wybierz plik ZL albo CSV z banku.", "error");
+    return;
+  }
+
+  setSaveStatus("Importuje pliki i dopasowuje platnosci...", "pending");
+
+  try {
+    const payload = {};
+
+    if (zlFile) {
+      payload.zlFileName = zlFile.name;
+      payload.zlBase64 = await readFileAsBase64(zlFile);
+    }
+
+    if (bankFile) {
+      payload.bankFileName = bankFile.name;
+      payload.bankBase64 = await readFileAsBase64(bankFile);
+    }
+
+    const response = await fetch("/api/reconciliation/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      setSaveStatus("Nie udalo sie zaimportowac plikow do rozliczen.", "error");
+      return;
+    }
+
+    const result = await response.json();
+    await refreshBootstrapData();
+    renderAll();
+    setActiveView("billing");
+    setSaveStatus(
+      `Dopasowanie gotowe: ${result.paymentMatches.summary.suggested} propozycji, ${result.paymentMatches.summary.missing} bez platnosci.`,
+      "success"
+    );
+  } catch (error) {
+    setSaveStatus("Nie udalo sie odczytac plikow rozliczeniowych.", "error");
+  }
+}
+
+async function confirmPaymentMatch(matchId) {
+  setSaveStatus("Potwierdzam platnosc...", "pending");
+
+  const response = await fetch(`/api/reconciliation/matches/${encodeURIComponent(matchId)}/confirm`, {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie potwierdzic platnosci.", "error");
+    return;
+  }
+
+  await refreshBootstrapData();
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus("Platnosc potwierdzona i przypisana do sesji.", "success");
+}
+
+async function confirmConfidentPaymentMatches() {
+  setSaveStatus("Potwierdzam pewne dopasowania...", "pending");
+
+  const response = await fetch("/api/reconciliation/confirm-confident", {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie potwierdzic pewnych dopasowan.", "error");
+    return;
+  }
+
+  const result = await response.json();
+  await refreshBootstrapData();
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus(`Potwierdzono automatycznie ${result.confirmed} pewnych platnosci.`, "success");
 }
 
 async function createManualVisit() {
@@ -1263,6 +1427,12 @@ function attachActions() {
       await promoteImportRow(button.dataset.importId, button.dataset.rowId);
     };
   });
+
+  document.querySelectorAll(".confirm-payment-match").forEach((button) => {
+    button.onclick = async () => {
+      await confirmPaymentMatch(button.dataset.matchId);
+    };
+  });
 }
 
 function renderAll() {
@@ -1307,6 +1477,8 @@ document.getElementById("export-data-store")?.addEventListener("click", () => {
 });
 
 document.getElementById("import-data-store")?.addEventListener("click", importDataStore);
+document.getElementById("run-reconciliation-import")?.addEventListener("click", runReconciliationImport);
+document.getElementById("confirm-confident-matches")?.addEventListener("click", confirmConfidentPaymentMatches);
 
 document.getElementById("patient-search")?.addEventListener("input", (event) => {
   state.patientSearch = event.target.value;

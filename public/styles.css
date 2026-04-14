@@ -331,6 +331,81 @@ p {
   grid-template-columns: 1fr 1fr;
 }
 
+.reconciliation-panel {
+  margin-top: 16px;
+}
+
+.reconciliation-import-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.reconciliation-actions {
+  margin-bottom: 18px;
+}
+
+.reconciliation-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.reconciliation-summary article {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(78, 50, 24, 0.08);
+}
+
+.reconciliation-summary span,
+.reconciliation-item span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.reconciliation-summary strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.reconciliation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reconciliation-item {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1.4fr) minmax(150px, 0.7fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(78, 50, 24, 0.08);
+}
+
+.reconciliation-item.confirmed {
+  background: rgba(35, 83, 71, 0.06);
+}
+
+.reconciliation-item.missing {
+  border-style: dashed;
+}
+
+.reconciliation-target,
+.reconciliation-transaction,
+.reconciliation-result {
+  display: grid;
+  gap: 5px;
+}
+
+.reconciliation-result {
+  justify-items: start;
+}
+
 .panel {
   padding: 22px;
   border-radius: var(--radius-lg);
@@ -847,6 +922,9 @@ input {
   .patients-layout,
   .imports-layout,
   .create-visit-grid,
+  .reconciliation-import-grid,
+  .reconciliation-summary,
+  .reconciliation-item,
   .billing-grid,
   .hero-grid {
     grid-template-columns: 1fr;

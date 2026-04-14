@@ -60,5 +60,19 @@
       }
     }
   ],
-  "imports": []
+  "imports": [],
+  "bankImports": [],
+  "paymentMatches": {
+    "generatedAt": null,
+    "summary": {
+      "sessions": 0,
+      "transactions": 0,
+      "suggested": 0,
+      "confident": 0,
+      "review": 0,
+      "missing": 0,
+      "confirmed": 0
+    },
+    "matches": []
+  }
 }

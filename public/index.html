@@ -357,6 +357,35 @@
               <div class="stats-table compact" id="billing-summary"></div>
             </section>
           </div>
+
+          <section class="panel reconciliation-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label">Walidacja platnosci</p>
+                <h3>Import ZL + wplywy bankowe</h3>
+              </div>
+            </div>
+
+            <div class="reconciliation-import-grid">
+              <div class="form-section">
+                <label for="reconciliation-zl-file">Kalendarz ZnanyLekarz XLSX</label>
+                <input id="reconciliation-zl-file" type="file" accept=".xlsx,.xls" />
+              </div>
+
+              <div class="form-section">
+                <label for="reconciliation-bank-file">Wplywy z banku CSV</label>
+                <input id="reconciliation-bank-file" type="file" accept=".csv,text/csv" />
+              </div>
+
+              <div class="inline-actions reconciliation-actions">
+                <button class="primary" id="run-reconciliation-import" type="button">Importuj i dopasuj</button>
+                <button class="secondary" id="confirm-confident-matches" type="button">Potwierdz pewne</button>
+              </div>
+            </div>
+
+            <div class="reconciliation-summary" id="reconciliation-summary"></div>
+            <div class="reconciliation-list" id="reconciliation-list"></div>
+          </section>
         </section>
 
         <section class="view" id="stats-view">

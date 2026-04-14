@@ -2,6 +2,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { TextDecoder } = require("util");
+const XLSX = require("xlsx");
 
 const PORT = Number(process.env.PORT || 5173);
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -208,8 +210,20 @@ function slugify(text) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0142/g, "l")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "item";
+}
+
+function normalizeSearchValue(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0142/g, "l")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getCurrentDateKey() {
@@ -231,6 +245,92 @@ function normalizeDateLabel(label) {
   }
 
   return String(label).trim();
+}
+
+function parseDateValue(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    }
+  }
+
+  const text = String(value || "").trim();
+  const numeric = text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (numeric) {
+    return new Date(Date.UTC(Number(numeric[3]), Number(numeric[2]) - 1, Number(numeric[1])));
+  }
+
+  return null;
+}
+
+function formatDateLabel(value) {
+  const date = parseDateValue(value);
+  if (!date) {
+    return normalizeDateLabel(value);
+  }
+
+  const day = date.getUTCDate();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `${day}.${month}.${year}`;
+}
+
+function dateSortValue(label) {
+  const date = parseDateValue(label);
+  if (!date) {
+    return 0;
+  }
+
+  return date.getUTCFullYear() * 10000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+}
+
+function dateDistanceDays(left, right) {
+  const leftDate = parseDateValue(left);
+  const rightDate = parseDateValue(right);
+  if (!leftDate || !rightDate) {
+    return 999;
+  }
+
+  return Math.round((rightDate.getTime() - leftDate.getTime()) / 86400000);
+}
+
+function formatTimeLabel(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  }
+
+  if (typeof value === "number") {
+    const totalMinutes = Math.round(value * 24 * 60);
+    return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+  }
+
+  const text = String(value || "").trim();
+  const time = text.match(/^(\d{1,2}):(\d{2})/);
+  if (time) {
+    return `${String(Number(time[1])).padStart(2, "0")}:${time[2]}`;
+  }
+
+  return text;
+}
+
+function parseAmount(value) {
+  if (typeof value === "number") {
+    return Number(value.toFixed(2));
+  }
+
+  const normalized = String(value || "")
+    .replace(/\s/g, "")
+    .replace(/\u00a0/g, "")
+    .replace(",", ".")
+    .replace(/[^0-9.-]/g, "");
+
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
 }
 
 function getWorkflowStage(visit) {
@@ -348,6 +448,647 @@ function buildImportedVisit(importRow) {
       followUpLabel: "zaimportowano z raportu ZL"
     }
   };
+}
+
+function getHeaderIndex(headers, names, fallback = -1) {
+  const normalizedNames = names.map(normalizeSearchValue);
+
+  for (let index = 0; index < headers.length; index += 1) {
+    if (normalizedNames.includes(normalizeSearchValue(headers[index]))) {
+      return index;
+    }
+  }
+
+  return fallback;
+}
+
+function valueAt(values, index) {
+  if (index < 0 || index >= values.length) {
+    return "";
+  }
+
+  return values[index];
+}
+
+function parseZlWorkbook(buffer, fileName) {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const values = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  const headerIndex = values.findIndex((row) => row.some((cell) => normalizeSearchValue(cell) === "data"));
+
+  if (headerIndex === -1) {
+    throw new Error("Missing ZnanyLekarz header row");
+  }
+
+  const headers = values[headerIndex];
+  const dateIndex = getHeaderIndex(headers, ["Data"], 0);
+  const timeIndex = getHeaderIndex(headers, ["Godzina", "Czas"], -1);
+  const patientIndex = getHeaderIndex(headers, ["Pacjent"], timeIndex >= 0 ? 2 : 1);
+  const serviceIndex = getHeaderIndex(headers, ["Usługi", "Uslugi", "Usługa", "Usluga"], timeIndex >= 0 ? 3 : 2);
+  const amountIndex = getHeaderIndex(headers, ["Wartość", "Wartosc", "Kwota"], timeIndex >= 0 ? 4 : 3);
+  const paymentIndex = getHeaderIndex(headers, ["Status płatności", "Status platnosci"], timeIndex >= 0 ? 5 : 4);
+  const sourceIndex = getHeaderIndex(headers, ["Źródło", "Zrodlo"], timeIndex >= 0 ? 6 : 5);
+  const statusIndex = getHeaderIndex(headers, ["Status"], timeIndex >= 0 ? 7 : 6);
+  const rows = [];
+
+  values.slice(headerIndex + 1).forEach((row) => {
+    const dateLabel = formatDateLabel(valueAt(row, dateIndex));
+    const time = formatTimeLabel(valueAt(row, timeIndex));
+    const patientName = String(valueAt(row, patientIndex) || "").trim();
+
+    if (!dateLabel || !patientName) {
+      return;
+    }
+
+    const legacyId = `zl-${slugify(`${dateLabel}-${patientName}`)}`;
+    const rowId = time ? `zl-${slugify(`${dateLabel}-${time}-${patientName}`)}` : legacyId;
+
+    rows.push({
+      id: rowId,
+      legacyId,
+      time,
+      dateLabel,
+      patientName,
+      serviceName: String(valueAt(row, serviceIndex) || "").trim(),
+      amount: parseAmount(valueAt(row, amountIndex)),
+      paymentStatus: String(valueAt(row, paymentIndex) || "").trim(),
+      source: String(valueAt(row, sourceIndex) || "").trim(),
+      bookingStatus: String(valueAt(row, statusIndex) || "").trim(),
+      importedAt: new Date().toISOString().slice(0, 16).replace("T", " ")
+    });
+  });
+
+  const sortedDates = rows.map((row) => dateSortValue(row.dateLabel)).filter(Boolean).sort((left, right) => left - right);
+  const firstDate = sortedDates[0] || dateSortValue(getCurrentDateKey());
+  const lastDate = sortedDates[sortedDates.length - 1] || firstDate;
+  const batchId = `zl-${firstDate}-${lastDate}`;
+
+  return {
+    id: batchId,
+    label: `ZnanyLekarz ${formatDateLabelFromSort(firstDate)} - ${formatDateLabelFromSort(lastDate)}`,
+    sourceFile: fileName,
+    importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    rowCount: rows.length,
+    rows
+  };
+}
+
+function formatDateLabelFromSort(value) {
+  const text = String(value || "");
+  if (text.length !== 8) {
+    return "";
+  }
+
+  return `${Number(text.slice(6, 8))}.${text.slice(4, 6)}.${text.slice(0, 4)}`;
+}
+
+function parseDelimitedLine(line) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && next === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === ";" && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  cells.push(current.trim());
+  return cells;
+}
+
+function cleanCsvValue(value) {
+  return String(value || "").replace(/^'+|'+$/g, "").trim();
+}
+
+function decodeCsvBuffer(buffer) {
+  const utf8 = buffer.toString("utf8");
+  if (!utf8.includes("\ufffd")) {
+    return utf8;
+  }
+
+  return new TextDecoder("windows-1250").decode(buffer);
+}
+
+function parseBankCsv(buffer, fileName) {
+  const text = decodeCsvBuffer(buffer).replace(/^\ufeff/, "");
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  const headerIndex = lines.findIndex((line) => line.startsWith("Data transakcji;"));
+
+  if (headerIndex === -1) {
+    throw new Error("Missing bank CSV header row");
+  }
+
+  const headers = parseDelimitedLine(lines[headerIndex]);
+  const transactionDateIndex = getHeaderIndex(headers, ["Data transakcji"], 0);
+  const bookingDateIndex = getHeaderIndex(headers, ["Data księgowania", "Data ksiegowania"], 1);
+  const counterpartyIndex = getHeaderIndex(headers, ["Dane kontrahenta"], 2);
+  const titleIndex = getHeaderIndex(headers, ["Tytuł", "Tytul"], 3);
+  const accountIndex = getHeaderIndex(headers, ["Nr rachunku"], 4);
+  const bankIndex = getHeaderIndex(headers, ["Nazwa banku"], 5);
+  const detailsIndex = getHeaderIndex(headers, ["Szczegóły", "Szczegoly"], 6);
+  const transactionNoIndex = getHeaderIndex(headers, ["Nr transakcji"], 7);
+  const amountIndex = getHeaderIndex(headers, ["Kwota transakcji (waluta rachunku)", "Kwota transakcji"], 8);
+  const currencyIndex = getHeaderIndex(headers, ["Waluta"], 9);
+  const transactions = [];
+
+  lines.slice(headerIndex + 1).forEach((line, rawIndex) => {
+    const row = parseDelimitedLine(line);
+    const amount = parseAmount(valueAt(row, amountIndex));
+
+    if (!amount || amount <= 0) {
+      return;
+    }
+
+    const transactionNo = cleanCsvValue(valueAt(row, transactionNoIndex));
+    const transactionDate = formatDateLabel(cleanCsvValue(valueAt(row, transactionDateIndex)));
+    const counterparty = cleanCsvValue(valueAt(row, counterpartyIndex));
+    const title = cleanCsvValue(valueAt(row, titleIndex));
+    const id = `bank-${slugify(transactionNo || `${transactionDate}-${counterparty}-${title}-${amount}`)}`;
+
+    transactions.push({
+      id,
+      transactionNo,
+      transactionDate,
+      bookingDate: formatDateLabel(cleanCsvValue(valueAt(row, bookingDateIndex))),
+      counterparty,
+      title,
+      account: cleanCsvValue(valueAt(row, accountIndex)),
+      bankName: cleanCsvValue(valueAt(row, bankIndex)),
+      details: cleanCsvValue(valueAt(row, detailsIndex)),
+      amount,
+      currency: cleanCsvValue(valueAt(row, currencyIndex)) || "PLN",
+      sourceFile: fileName,
+      rawIndex: rawIndex + 1
+    });
+  });
+
+  const sortedDates = transactions
+    .map((transaction) => dateSortValue(transaction.transactionDate))
+    .filter(Boolean)
+    .sort((left, right) => left - right);
+  const firstDate = sortedDates[0] || dateSortValue(getCurrentDateKey());
+  const lastDate = sortedDates[sortedDates.length - 1] || firstDate;
+
+  return {
+    id: `bank-${firstDate}-${lastDate}-${slugify(fileName)}`,
+    label: `Wpływy bankowe ${formatDateLabelFromSort(firstDate)} - ${formatDateLabelFromSort(lastDate)}`,
+    sourceFile: fileName,
+    importedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    rowCount: transactions.length,
+    transactions
+  };
+}
+
+function mergeZlBatch(store, batch) {
+  store.imports = store.imports || [];
+  const existingRows = new Map();
+
+  store.imports.forEach((existingBatch) => {
+    (existingBatch.rows || []).forEach((row) => {
+      existingRows.set(row.id, row);
+      if (row.legacyId) {
+        existingRows.set(row.legacyId, row);
+      }
+    });
+  });
+
+  batch.rows = batch.rows.map((row) => {
+    const existing = existingRows.get(row.id) || existingRows.get(row.legacyId);
+    if (!existing) {
+      return row;
+    }
+
+    return {
+      ...row,
+      processed: existing.processed || row.processed,
+      linkedVisitId: existing.linkedVisitId || row.linkedVisitId,
+      processedAt: existing.processedAt || row.processedAt,
+      paymentConfirmed: existing.paymentConfirmed || row.paymentConfirmed,
+      bankTransactionId: existing.bankTransactionId || row.bankTransactionId,
+      bankPaidAt: existing.bankPaidAt || row.bankPaidAt,
+      paymentMatchId: existing.paymentMatchId || row.paymentMatchId
+    };
+  });
+
+  store.imports = [batch, ...store.imports.filter((existingBatch) => existingBatch.id !== batch.id)];
+  return batch;
+}
+
+function mergeBankBatch(store, batch) {
+  store.bankImports = store.bankImports || [];
+  const existingTransactions = new Map();
+
+  store.bankImports.forEach((existingBatch) => {
+    (existingBatch.transactions || []).forEach((transaction) => {
+      existingTransactions.set(transaction.id, transaction);
+    });
+  });
+
+  batch.transactions = batch.transactions.map((transaction) => {
+    const existing = existingTransactions.get(transaction.id);
+    if (!existing) {
+      return transaction;
+    }
+
+    return {
+      ...transaction,
+      matchedTargets: existing.matchedTargets || transaction.matchedTargets,
+      matchedAt: existing.matchedAt || transaction.matchedAt
+    };
+  });
+
+  store.bankImports = [batch, ...store.bankImports.filter((existingBatch) => existingBatch.id !== batch.id)];
+  return batch;
+}
+
+function isPaidImportRow(row) {
+  return Boolean(row.paymentConfirmed || row.bankTransactionId);
+}
+
+function isPaidVisit(visit) {
+  return visit.payment?.status === "paid";
+}
+
+function collectSessions(store) {
+  const sessions = [];
+  const seenSessionKeys = new Set();
+  const linkedVisitIds = new Set();
+
+  (store.imports || []).forEach((batch) => {
+    (batch.rows || []).forEach((row) => {
+      const sessionKey = `${normalizeSearchValue(row.patientName)}|${normalizeDateLabel(row.dateLabel)}|${row.time || ""}|${Number(row.amount || 0)}`;
+      if (seenSessionKeys.has(sessionKey)) {
+        return;
+      }
+
+      seenSessionKeys.add(sessionKey);
+      if (row.linkedVisitId) {
+        linkedVisitIds.add(row.linkedVisitId);
+      }
+
+      sessions.push({
+        id: `import:${batch.id}:${row.id}`,
+        type: "importRow",
+        importId: batch.id,
+        rowId: row.id,
+        linkedVisitId: row.linkedVisitId,
+        patientName: row.patientName,
+        dateLabel: row.dateLabel,
+        time: row.time || "",
+        amount: Number(row.amount || 0),
+        paid: isPaidImportRow(row),
+        bankTransactionId: row.bankTransactionId || null
+      });
+    });
+  });
+
+  (store.visits || []).forEach((visit) => {
+    if (linkedVisitIds.has(visit.id)) {
+      return;
+    }
+
+    sessions.push({
+      id: `visit:${visit.id}`,
+      type: "visit",
+      visitId: visit.id,
+      patientName: visit.patientName,
+      dateLabel: visit.dateLabel,
+      time: visit.time || "",
+      amount: Number(visit.payment?.amount || 0),
+      paid: isPaidVisit(visit),
+      bankTransactionId: visit.payment?.bankTransactionId || null
+    });
+  });
+
+  return sessions
+    .filter((session) => session.amount > 0)
+    .sort((left, right) => dateSortValue(left.dateLabel) - dateSortValue(right.dateLabel));
+}
+
+function collectTransactions(store) {
+  const byId = new Map();
+
+  (store.bankImports || []).forEach((batch) => {
+    (batch.transactions || []).forEach((transaction) => {
+      if (!byId.has(transaction.id)) {
+        byId.set(transaction.id, transaction);
+      }
+    });
+  });
+
+  return Array.from(byId.values()).sort(
+    (left, right) => dateSortValue(left.transactionDate) - dateSortValue(right.transactionDate)
+  );
+}
+
+function patientTokenScore(patientName, transaction) {
+  const patientTokens = normalizeSearchValue(patientName)
+    .split(" ")
+    .filter((token) => token.length >= 3);
+  const transactionText = normalizeSearchValue(`${transaction.counterparty} ${transaction.title}`);
+  const matchedTokens = patientTokens.filter((token) => transactionText.includes(token));
+
+  if (patientTokens.length && matchedTokens.length === patientTokens.length) {
+    return 45;
+  }
+
+  if (matchedTokens.length >= 2) {
+    return 35;
+  }
+
+  if (matchedTokens.length === 1) {
+    return 24;
+  }
+
+  return 0;
+}
+
+function scoreTransactionForSession(transaction, session) {
+  let score = 0;
+
+  if (Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01) {
+    score += 30;
+  }
+
+  score += patientTokenScore(session.patientName, transaction);
+
+  const distance = dateDistanceDays(session.dateLabel, transaction.transactionDate);
+  if (distance === 0) {
+    score += 25;
+  } else if (distance > 0 && distance <= 3) {
+    score += 20;
+  } else if (distance > 0 && distance <= 10) {
+    score += 12;
+  } else if (distance > 0 && distance <= 31) {
+    score += 6;
+  } else if (distance < 0 && distance >= -2) {
+    score += 4;
+  } else {
+    score -= 15;
+  }
+
+  const dateParts = String(session.dateLabel || "").split(".");
+  if (dateParts.length >= 2 && normalizeSearchValue(transaction.title).includes(`${Number(dateParts[0])} ${Number(dateParts[1])}`)) {
+    score += 4;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function confidenceForScore(score) {
+  if (score >= 82) {
+    return "pewne";
+  }
+
+  if (score >= 60) {
+    return "do sprawdzenia";
+  }
+
+  return "niskie";
+}
+
+function buildMatch(transaction, sessions, score, kind = "single") {
+  const totalAmount = sessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
+  const targetSlug = sessions.map((session) => slugify(session.id)).join("-");
+
+  return {
+    id: `match-${transaction.id}-${targetSlug}`,
+    kind,
+    status: "suggested",
+    confidence: confidenceForScore(score),
+    score,
+    transaction: {
+      id: transaction.id,
+      transactionNo: transaction.transactionNo,
+      transactionDate: transaction.transactionDate,
+      counterparty: transaction.counterparty,
+      title: transaction.title,
+      amount: transaction.amount,
+      currency: transaction.currency
+    },
+    targets: sessions.map((session) => ({
+      id: session.id,
+      type: session.type,
+      visitId: session.visitId,
+      importId: session.importId,
+      rowId: session.rowId,
+      linkedVisitId: session.linkedVisitId,
+      patientName: session.patientName,
+      dateLabel: session.dateLabel,
+      time: session.time,
+      amount: session.amount
+    })),
+    delta: Number((Number(transaction.amount) - totalAmount).toFixed(2))
+  };
+}
+
+function generatePaymentMatches(store) {
+  const sessions = collectSessions(store);
+  const transactions = collectTransactions(store);
+  const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
+  const confirmedSessionIds = new Set(confirmedMatches.flatMap((match) => (match.targets || []).map((target) => target.id)));
+  const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
+  const availableSessions = sessions.filter((session) => !session.paid && !confirmedSessionIds.has(session.id));
+  const matches = [...confirmedMatches];
+  const usedSessionIds = new Set(confirmedSessionIds);
+  const usedTransactionIds = new Set(confirmedTransactionIds);
+
+  transactions.forEach((transaction) => {
+    if (usedTransactionIds.has(transaction.id)) {
+      return;
+    }
+
+    const candidates = availableSessions
+      .filter((session) => !usedSessionIds.has(session.id))
+      .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+      .map((session) => ({ session, score: scoreTransactionForSession(transaction, session) }))
+      .filter((candidate) => candidate.score >= 52)
+      .sort((left, right) => right.score - left.score);
+
+    const best = candidates[0];
+    if (!best) {
+      return;
+    }
+
+    matches.push(buildMatch(transaction, [best.session], best.score));
+    usedTransactionIds.add(transaction.id);
+    usedSessionIds.add(best.session.id);
+  });
+
+  transactions.forEach((transaction) => {
+    if (usedTransactionIds.has(transaction.id)) {
+      return;
+    }
+
+    const patientGroups = new Map();
+    availableSessions
+      .filter((session) => !usedSessionIds.has(session.id))
+      .filter((session) => patientTokenScore(session.patientName, transaction) >= 24)
+      .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) >= 0)
+      .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) <= 45)
+      .forEach((session) => {
+        const key = normalizeSearchValue(session.patientName);
+        if (!patientGroups.has(key)) {
+          patientGroups.set(key, []);
+        }
+
+        patientGroups.get(key).push(session);
+      });
+
+    for (const group of patientGroups.values()) {
+      const sortedGroup = group.sort((left, right) => dateSortValue(left.dateLabel) - dateSortValue(right.dateLabel));
+      const targetSessions = [];
+      let sum = 0;
+
+      for (let index = sortedGroup.length - 1; index >= 0; index -= 1) {
+        targetSessions.unshift(sortedGroup[index]);
+        sum = Number((sum + Number(sortedGroup[index].amount || 0)).toFixed(2));
+
+        if (Math.abs(sum - Number(transaction.amount)) < 0.01 && targetSessions.length > 1) {
+          const score = Math.min(96, 48 + patientTokenScore(targetSessions[0].patientName, transaction) + 8);
+          matches.push(buildMatch(transaction, targetSessions, score, "group"));
+          usedTransactionIds.add(transaction.id);
+          targetSessions.forEach((session) => usedSessionIds.add(session.id));
+          return;
+        }
+
+        if (sum > Number(transaction.amount)) {
+          break;
+        }
+      }
+    }
+  });
+
+  availableSessions
+    .filter((session) => !usedSessionIds.has(session.id))
+    .forEach((session) => {
+      matches.push({
+        id: `missing-${slugify(session.id)}`,
+        kind: "missing",
+        status: "missing",
+        confidence: "brak płatności",
+        score: 0,
+        transaction: null,
+        targets: [
+          {
+            id: session.id,
+            type: session.type,
+            visitId: session.visitId,
+            importId: session.importId,
+            rowId: session.rowId,
+            linkedVisitId: session.linkedVisitId,
+            patientName: session.patientName,
+            dateLabel: session.dateLabel,
+            time: session.time,
+            amount: session.amount
+          }
+        ],
+        delta: Number(session.amount || 0)
+      });
+    });
+
+  const suggestedMatches = matches.filter((match) => match.status === "suggested");
+  const summary = {
+    sessions: sessions.length,
+    transactions: transactions.length,
+    suggested: suggestedMatches.length,
+    confident: suggestedMatches.filter((match) => match.confidence === "pewne").length,
+    review: suggestedMatches.filter((match) => match.confidence !== "pewne").length,
+    missing: matches.filter((match) => match.status === "missing").length,
+    confirmed: matches.filter((match) => match.status === "confirmed").length
+  };
+
+  store.paymentMatches = {
+    generatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    summary,
+    matches
+  };
+
+  return store.paymentMatches;
+}
+
+function applyPaymentToTarget(store, target, transaction, matchId) {
+  const paidAt = transaction.transactionDate || new Date().toISOString().slice(0, 10);
+
+  if (target.type === "importRow") {
+    const batch = (store.imports || []).find((item) => item.id === target.importId);
+    const row = batch?.rows?.find((item) => item.id === target.rowId);
+    if (row) {
+      row.paymentConfirmed = true;
+      row.paymentStatus = "Zapłacono";
+      row.bankTransactionId = transaction.id;
+      row.bankPaidAt = paidAt;
+      row.paymentMatchId = matchId;
+    }
+
+    if (target.linkedVisitId) {
+      const visit = (store.visits || []).find((item) => item.id === target.linkedVisitId);
+      if (visit) {
+        visit.payment = {
+          ...visit.payment,
+          status: "paid",
+          statusLabel: "oplacone",
+          bankTransactionId: transaction.id,
+          paidAt,
+          paymentMatchId: matchId
+        };
+      }
+    }
+
+    return;
+  }
+
+  const visit = (store.visits || []).find((item) => item.id === target.visitId);
+  if (visit) {
+    visit.payment = {
+      ...visit.payment,
+      status: "paid",
+      statusLabel: "oplacone",
+      bankTransactionId: transaction.id,
+      paidAt,
+      paymentMatchId: matchId
+    };
+  }
+}
+
+function confirmPaymentMatchInStore(store, match) {
+  if (!match || !match.transaction || match.status === "missing" || match.status === "confirmed") {
+    return false;
+  }
+
+  (match.targets || []).forEach((target) => applyPaymentToTarget(store, target, match.transaction, match.id));
+
+  (store.bankImports || []).forEach((batch) => {
+    (batch.transactions || []).forEach((transaction) => {
+      if (transaction.id === match.transaction.id) {
+        transaction.matchedTargets = match.targets.map((target) => target.id);
+        transaction.matchedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
+      }
+    });
+  });
+
+  match.status = "confirmed";
+  match.confirmedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
+  return true;
 }
 
 function collectRequestBody(req, maxBytes = 5 * 1024 * 1024) {
@@ -497,6 +1238,104 @@ const server = http.createServer(async (req, res) => {
       });
     } catch (error) {
       sendJson(res, 400, { error: "Unable to import DocDash store" });
+    }
+
+    return;
+  }
+
+  if (pathname === "/api/reconciliation" && req.method === "GET") {
+    const data = readData();
+    if (!data.paymentMatches) {
+      generatePaymentMatches(data);
+      writeData(data);
+    }
+
+    sendJson(res, 200, {
+      paymentMatches: data.paymentMatches,
+      bankImports: data.bankImports || []
+    });
+    return;
+  }
+
+  if (pathname === "/api/reconciliation/import" && req.method === "POST") {
+    try {
+      const payload = await collectRequestBody(req, 30 * 1024 * 1024);
+      const data = readData();
+      const result = {
+        zl: null,
+        bank: null,
+        paymentMatches: null
+      };
+
+      if (payload.zlBase64) {
+        const zlBuffer = Buffer.from(payload.zlBase64, "base64");
+        const zlBatch = mergeZlBatch(data, parseZlWorkbook(zlBuffer, payload.zlFileName || "znanylekarz.xlsx"));
+        result.zl = {
+          id: zlBatch.id,
+          label: zlBatch.label,
+          rows: zlBatch.rows.length
+        };
+      }
+
+      if (payload.bankBase64) {
+        const bankBuffer = Buffer.from(payload.bankBase64, "base64");
+        const bankBatch = mergeBankBatch(data, parseBankCsv(bankBuffer, payload.bankFileName || "bank.csv"));
+        result.bank = {
+          id: bankBatch.id,
+          label: bankBatch.label,
+          transactions: bankBatch.transactions.length
+        };
+      }
+
+      result.paymentMatches = generatePaymentMatches(data);
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      writeData(data);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to import reconciliation files" });
+    }
+
+    return;
+  }
+
+  if (pathname.startsWith("/api/reconciliation/matches/") && pathname.endsWith("/confirm") && req.method === "POST") {
+    try {
+      const segments = pathname.split("/").filter(Boolean);
+      const matchId = decodeURIComponent(segments[3]);
+      const data = readData();
+      const match = data.paymentMatches?.matches?.find((item) => item.id === matchId);
+
+      if (!match || !match.transaction || match.status === "missing") {
+        sendJson(res, 404, { error: "Payment match not found" });
+        return;
+      }
+
+      confirmPaymentMatchInStore(data, match);
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, { ok: true, paymentMatches: data.paymentMatches });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to confirm payment match" });
+    }
+
+    return;
+  }
+
+  if (pathname === "/api/reconciliation/confirm-confident" && req.method === "POST") {
+    try {
+      const data = readData();
+      const matches = data.paymentMatches?.matches || [];
+      const confirmed = matches
+        .filter((match) => match.status === "suggested" && match.confidence === "pewne" && match.transaction)
+        .filter((match) => confirmPaymentMatchInStore(data, match)).length;
+
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, { ok: true, confirmed, paymentMatches: data.paymentMatches });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to confirm confident payment matches" });
     }
 
     return;
