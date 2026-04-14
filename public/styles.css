@@ -440,6 +440,81 @@ p {
   font-size: 0.78rem;
 }
 
+.patient-reconciliation-panel {
+  margin: 8px 0 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(35, 83, 71, 0.16);
+}
+
+.patient-reconciliation-panel .panel-header span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.patient-reconciliation-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.82fr) minmax(320px, 1.18fr);
+  gap: 12px;
+}
+
+.ledger-column-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
+.ledger-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ledger-session,
+.ledger-transaction {
+  border: 1px solid rgba(78, 50, 24, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px 12px;
+}
+
+.ledger-session {
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.ledger-session.selected,
+.ledger-transaction.recommended {
+  border-color: rgba(35, 83, 71, 0.32);
+  background: rgba(35, 83, 71, 0.07);
+}
+
+.ledger-transaction {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.ledger-transaction span,
+.ledger-session span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.ledger-transaction-actions {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.ledger-exception-actions {
+  margin-top: 10px;
+}
+
 .external-payment-actions {
   display: flex;
   flex-wrap: wrap;
@@ -973,6 +1048,7 @@ input {
   .detail-layout,
   .stats-layout,
   .patients-layout,
+  .patient-reconciliation-grid,
   .imports-layout,
   .create-visit-grid,
   .reconciliation-import-grid,

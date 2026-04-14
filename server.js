@@ -1195,7 +1195,7 @@ function generatePaymentMatches(store) {
       .filter((session) => !usedSessionIds.has(session.id))
       .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
       .filter((session) => !isPaymentRejected(rejectedPairs, transaction, session))
-      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 24)
+      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 35)
       .forEach((session) => {
         const details = scoreTransactionForSession(transaction, session, aliases);
         if (details.score >= 52) {
@@ -1237,7 +1237,7 @@ function generatePaymentMatches(store) {
     availableSessions
       .filter((session) => !usedSessionIds.has(session.id))
       .filter((session) => !isPaymentRejected(rejectedPairs, transaction, session))
-      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 24)
+      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 35)
       .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) >= 0)
       .filter((session) => dateDistanceDays(session.dateLabel, transaction.transactionDate) <= 45)
       .forEach((session) => {
@@ -1576,6 +1576,73 @@ function confirmExternalPayment(store, targetId, method, rememberPatient = false
   return { match, rulesAdded };
 }
 
+function buildPatientReconciliation(store, patientName) {
+  const patientKey = normalizeSearchValue(patientName);
+  if (!patientKey) {
+    return null;
+  }
+
+  const sessions = collectSessions(store)
+    .filter((session) => normalizeSearchValue(session.patientName) === patientKey)
+    .filter((session) => !session.paid);
+  const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
+  const rejectedPairs = rejectedPaymentSet(store);
+  const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
+  const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
+  const transactions = collectTransactions(store)
+    .filter((transaction) => !confirmedTransactionIds.has(transaction.id))
+    .map((transaction) => {
+      const identity = patientIdentityScore(patientName, transaction, aliases);
+      const sessionScores = sessions
+        .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+        .filter((session) => !isPaymentRejected(rejectedPairs, transaction, session))
+        .map((session) => {
+          const details = scoreTransactionForSession(transaction, session, aliases);
+          return {
+            sessionId: session.id,
+            score: details.score,
+            reasons: details.reasons,
+            distance: Math.abs(dateDistanceDays(session.dateLabel, transaction.transactionDate))
+          };
+        })
+        .sort((left, right) => {
+          if (right.score !== left.score) {
+            return right.score - left.score;
+          }
+
+          return left.distance - right.distance;
+        });
+      const best = sessionScores[0] || null;
+      const include = identity.score >= 35;
+
+      if (!include) {
+        return null;
+      }
+
+      return {
+        id: transaction.id,
+        transactionNo: transaction.transactionNo,
+        transactionDate: transaction.transactionDate,
+        counterparty: transaction.counterparty,
+        title: transaction.title,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        score: Math.max(identity.score, best?.score || 0),
+        reasons: uniqueReasons([...(identity.reasons || []), ...(best?.reasons || [])]),
+        bestSessionId: best?.sessionId || null
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => dateSortValue(left.transactionDate) - dateSortValue(right.transactionDate));
+
+  return {
+    patientName: sessions[0]?.patientName || patientName,
+    patientKey,
+    sessions: sessions.map(matchTargetFromSession),
+    transactions
+  };
+}
+
 function rejectPaymentMatchInStore(store, match) {
   if (!match?.transaction?.id || !(match.targets || []).length) {
     return 0;
@@ -1797,6 +1864,24 @@ const server = http.createServer(async (req, res) => {
       paymentMatches: data.paymentMatches,
       bankImports: data.bankImports || []
     });
+    return;
+  }
+
+  if (pathname === "/api/reconciliation/patient" && req.method === "GET") {
+    const patientName = requestUrl.searchParams.get("name") || "";
+    const data = readData();
+    if (!data.paymentMatches) {
+      generatePaymentMatches(data);
+      writeData(data);
+    }
+
+    const ledger = buildPatientReconciliation(data, patientName);
+    if (!ledger) {
+      sendJson(res, 400, { error: "Missing patient name" });
+      return;
+    }
+
+    sendJson(res, 200, ledger);
     return;
   }
 

@@ -34,6 +34,8 @@ const state = {
   patientSearch: "",
   showDayFollowup: false,
   showImportArchive: false,
+  reconciliationLedger: null,
+  reconciliationSelectedSessionId: null,
   activeView: "dashboard"
 };
 
@@ -821,6 +823,110 @@ function renderBilling() {
   renderReconciliation();
 }
 
+function renderPatientReconciliation() {
+  const panel = document.getElementById("patient-reconciliation-panel");
+  const ledger = state.reconciliationLedger;
+
+  if (!panel) {
+    return;
+  }
+
+  if (!ledger) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+
+  const sessions = ledger.sessions || [];
+  const transactions = ledger.transactions || [];
+  if (!sessions.some((session) => session.id === state.reconciliationSelectedSessionId)) {
+    state.reconciliationSelectedSessionId = sessions[0]?.id || null;
+  }
+
+  const selectedSession = sessions.find((session) => session.id === state.reconciliationSelectedSessionId);
+  const sessionCopy = selectedSession
+    ? `${selectedSession.dateLabel} ${selectedSession.time || ""} - ${formatCurrency(selectedSession.amount)}`
+    : "Wybierz sesje";
+
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="panel-header compact-header">
+      <div>
+        <p class="panel-label">Rozlicz pacjenta</p>
+        <h3>${ledger.patientName}</h3>
+        <span>Wybrana sesja: ${sessionCopy}</span>
+      </div>
+      <button class="ghost close-patient-reconciliation" type="button">Zamknij</button>
+    </div>
+
+    <div class="patient-reconciliation-grid">
+      <section>
+        <div class="ledger-column-header">
+          <strong>Sesje do rozliczenia</strong>
+          <span>${sessions.length}</span>
+        </div>
+        <div class="ledger-list">
+          ${
+            sessions.length
+              ? sessions
+                  .map((session) => `
+                    <button class="ledger-session ${session.id === state.reconciliationSelectedSessionId ? "selected" : ""}" type="button" data-ledger-session-id="${session.id}">
+                      <strong>${session.dateLabel} ${session.time || ""}</strong>
+                      <span>${formatCurrency(session.amount)}</span>
+                    </button>
+                  `)
+                  .join("")
+              : `<div class="empty-state">Brak nierozliczonych sesji dla tego pacjenta.</div>`
+          }
+        </div>
+        ${
+          selectedSession
+            ? `
+              <div class="external-payment-actions ledger-exception-actions">
+                <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="false">Gotowka</button>
+                <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="false">Inne konto</button>
+                <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="ignored" data-remember="false">Pomin</button>
+                <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="true">Gotowka stale</button>
+                <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="true">Inne konto stale</button>
+              </div>
+            `
+            : ""
+        }
+      </section>
+
+      <section>
+        <div class="ledger-column-header">
+          <strong>Wplywy do wyboru</strong>
+          <span>${transactions.length}</span>
+        </div>
+        <div class="ledger-list">
+          ${
+            transactions.length
+              ? transactions
+                  .map((transaction) => `
+                    <article class="ledger-transaction ${transaction.bestSessionId === state.reconciliationSelectedSessionId ? "recommended" : ""}">
+                      <div>
+                        <strong>${transaction.transactionDate} - ${transaction.counterparty}</strong>
+                        <span>${transaction.title || "bez tytulu"}</span>
+                        <div class="reconciliation-signals">
+                          ${(transaction.reasons || []).slice(0, 4).map((reason) => `<span>${reason}</span>`).join("")}
+                        </div>
+                      </div>
+                      <div class="ledger-transaction-actions">
+                        <strong>${formatCurrency(transaction.amount)}</strong>
+                        <button class="primary ledger-link-payment" type="button" data-target-id="${state.reconciliationSelectedSessionId || ""}" data-transaction-id="${transaction.id}" ${state.reconciliationSelectedSessionId ? "" : "disabled"}>Podepnij</button>
+                      </div>
+                    </article>
+                  `)
+                  .join("")
+              : `<div class="empty-state">Brak wolnych wplywow z wyraznym sygnalem tego pacjenta.</div>`
+          }
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function renderReconciliation() {
   const reconciliation = state.data.paymentMatches || { summary: {}, matches: [] };
   const summary = reconciliation.summary || {};
@@ -836,6 +942,8 @@ function renderReconciliation() {
     <article><span>Potwierdzone</span><strong>${summary.confirmed || 0}</strong></article>
   `;
 
+  renderPatientReconciliation();
+
   if (!matches.length) {
     document.getElementById("reconciliation-list").innerHTML = `
       <div class="empty-state">Brak dopasowan. Zaimportuj kalendarz ZL i wplywy bankowe, zeby uruchomic walidacje platnosci.</div>
@@ -849,6 +957,10 @@ function renderReconciliation() {
         .map((target) => `${target.dateLabel} ${target.time || ""} - ${target.patientName} - ${formatCurrency(target.amount)}`)
         .join("<br />");
       const firstTargetId = match.targets?.[0]?.id || "";
+      const firstPatientName = match.targets?.[0]?.patientName || "";
+      const openPatientButton = firstPatientName
+        ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(firstPatientName)}">Rozlicz pacjenta</button>`
+        : "";
       const transactionCopy = match.externalPayment
         ? `Platnosc poza bankiem: ${match.externalPayment.label}`
         : match.transaction
@@ -915,6 +1027,7 @@ function renderReconciliation() {
             <span class="badge ${badgeClass}">${match.status === "confirmed" ? "potwierdzone" : match.confidence}</span>
             <strong>${match.transaction ? formatSignedCurrency(match.delta) : formatCurrency(match.delta)}</strong>
             ${actionsCopy}
+            ${openPatientButton}
           </div>
         </article>
       `;
@@ -1038,6 +1151,44 @@ async function refreshBootstrapData() {
   return true;
 }
 
+async function fetchPatientReconciliation(patientName) {
+  const response = await fetch(`/api/reconciliation/patient?name=${encodeURIComponent(patientName)}`);
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json();
+}
+
+async function openPatientReconciliation(patientName) {
+  setSaveStatus("Laduje rozliczenie pacjenta...", "pending");
+  const ledger = await fetchPatientReconciliation(patientName);
+
+  if (!ledger) {
+    setSaveStatus("Nie udalo sie pobrac rozliczenia pacjenta.", "error");
+    return;
+  }
+
+  state.reconciliationLedger = ledger;
+  state.reconciliationSelectedSessionId = ledger.sessions?.[0]?.id || null;
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus(`Rozliczenie pacjenta: ${ledger.patientName}`, "success");
+}
+
+async function refreshOpenPatientReconciliation() {
+  if (!state.reconciliationLedger?.patientName) {
+    return;
+  }
+
+  const previousSessionId = state.reconciliationSelectedSessionId;
+  const ledger = await fetchPatientReconciliation(state.reconciliationLedger.patientName);
+  state.reconciliationLedger = ledger;
+  state.reconciliationSelectedSessionId = ledger?.sessions?.some((session) => session.id === previousSessionId)
+    ? previousSessionId
+    : ledger?.sessions?.[0]?.id || null;
+}
+
 function readJsonFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1149,6 +1300,7 @@ async function runReconciliationImport() {
 
     const result = await response.json();
     await refreshBootstrapData();
+    await refreshOpenPatientReconciliation();
     renderAll();
     setActiveView("billing");
     setSaveStatus(
@@ -1176,6 +1328,7 @@ async function confirmPaymentMatch(matchId, rememberPayer = false) {
 
   const result = await response.json();
   await refreshBootstrapData();
+  await refreshOpenPatientReconciliation();
   renderAll();
   setActiveView("billing");
   setSaveStatus(
@@ -1199,6 +1352,7 @@ async function rejectPaymentMatch(matchId) {
   }
 
   await refreshBootstrapData();
+  await refreshOpenPatientReconciliation();
   renderAll();
   setActiveView("billing");
   setSaveStatus("Dopasowanie odrzucone. Ta para nie bedzie juz proponowana.", "success");
@@ -1220,6 +1374,7 @@ async function confirmManualPaymentMatch(targetId, transactionId) {
 
   const result = await response.json();
   await refreshBootstrapData();
+  await refreshOpenPatientReconciliation();
   renderAll();
   setActiveView("billing");
   setSaveStatus(
@@ -1247,6 +1402,7 @@ async function confirmExternalPayment(targetId, method, rememberPatient = false)
 
   const result = await response.json();
   await refreshBootstrapData();
+  await refreshOpenPatientReconciliation();
   renderAll();
   setActiveView("billing");
   setSaveStatus(
@@ -1568,6 +1724,35 @@ function attachActions() {
   document.querySelectorAll(".reject-payment-match").forEach((button) => {
     button.onclick = async () => {
       await rejectPaymentMatch(button.dataset.matchId);
+    };
+  });
+
+  document.querySelectorAll(".open-patient-reconciliation").forEach((button) => {
+    button.onclick = async () => {
+      await openPatientReconciliation(decodeURIComponent(button.dataset.patientName || ""));
+    };
+  });
+
+  document.querySelectorAll(".close-patient-reconciliation").forEach((button) => {
+    button.onclick = () => {
+      state.reconciliationLedger = null;
+      state.reconciliationSelectedSessionId = null;
+      renderAll();
+      setActiveView("billing");
+    };
+  });
+
+  document.querySelectorAll(".ledger-session").forEach((button) => {
+    button.onclick = () => {
+      state.reconciliationSelectedSessionId = button.dataset.ledgerSessionId;
+      renderAll();
+      setActiveView("billing");
+    };
+  });
+
+  document.querySelectorAll(".ledger-link-payment").forEach((button) => {
+    button.onclick = async () => {
+      await confirmManualPaymentMatch(button.dataset.targetId, button.dataset.transactionId);
     };
   });
 
