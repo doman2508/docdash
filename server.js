@@ -685,7 +685,11 @@ function mergeZlBatch(store, batch) {
       paymentConfirmed: existing.paymentConfirmed || row.paymentConfirmed,
       bankTransactionId: existing.bankTransactionId || row.bankTransactionId,
       bankPaidAt: existing.bankPaidAt || row.bankPaidAt,
-      paymentMatchId: existing.paymentMatchId || row.paymentMatchId
+      paymentMatchId: existing.paymentMatchId || row.paymentMatchId,
+      externalPaymentMethod: existing.externalPaymentMethod || row.externalPaymentMethod,
+      externalPaidAt: existing.externalPaidAt || row.externalPaidAt,
+      paymentIgnored: existing.paymentIgnored || row.paymentIgnored,
+      paymentIgnoredAt: existing.paymentIgnoredAt || row.paymentIgnoredAt
     };
   });
 
@@ -721,11 +725,19 @@ function mergeBankBatch(store, batch) {
 }
 
 function isPaidImportRow(row) {
-  return Boolean(row.paymentConfirmed || row.bankTransactionId);
+  return Boolean(row.paymentConfirmed || row.bankTransactionId || row.externalPaymentMethod);
+}
+
+function isIgnoredImportRow(row) {
+  return Boolean(row.paymentIgnored);
 }
 
 function isPaidVisit(visit) {
   return visit.payment?.status === "paid";
+}
+
+function isIgnoredVisit(visit) {
+  return visit.payment?.status === "ignored";
 }
 
 function collectSessions(store) {
@@ -735,6 +747,10 @@ function collectSessions(store) {
 
   (store.imports || []).forEach((batch) => {
     (batch.rows || []).forEach((row) => {
+      if (isIgnoredImportRow(row)) {
+        return;
+      }
+
       const sessionKey = `${normalizeSearchValue(row.patientName)}|${normalizeDateLabel(row.dateLabel)}|${row.time || ""}|${Number(row.amount || 0)}`;
       if (seenSessionKeys.has(sessionKey)) {
         return;
@@ -762,6 +778,10 @@ function collectSessions(store) {
   });
 
   (store.visits || []).forEach((visit) => {
+    if (isIgnoredVisit(visit)) {
+      return;
+    }
+
     if (linkedVisitIds.has(visit.id)) {
       return;
     }
@@ -978,6 +998,21 @@ function confidenceForScore(score) {
   return "niskie";
 }
 
+function matchTargetFromSession(session) {
+  return {
+    id: session.id,
+    type: session.type,
+    visitId: session.visitId,
+    importId: session.importId,
+    rowId: session.rowId,
+    linkedVisitId: session.linkedVisitId,
+    patientName: session.patientName,
+    dateLabel: session.dateLabel,
+    time: session.time,
+    amount: session.amount
+  };
+}
+
 function buildMatch(transaction, sessions, score, kind = "single", reasons = []) {
   const totalAmount = sessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
   const targetSlug = sessions.map((session) => slugify(session.id)).join("-");
@@ -998,19 +1033,49 @@ function buildMatch(transaction, sessions, score, kind = "single", reasons = [])
       amount: transaction.amount,
       currency: transaction.currency
     },
-    targets: sessions.map((session) => ({
-      id: session.id,
-      type: session.type,
-      visitId: session.visitId,
-      importId: session.importId,
-      rowId: session.rowId,
-      linkedVisitId: session.linkedVisitId,
-      patientName: session.patientName,
-      dateLabel: session.dateLabel,
-      time: session.time,
-      amount: session.amount
-    })),
+    targets: sessions.map(matchTargetFromSession),
     delta: Number((Number(transaction.amount) - totalAmount).toFixed(2))
+  };
+}
+
+const EXTERNAL_PAYMENT_METHODS = {
+  cash: {
+    label: "gotowka",
+    reason: "platnosc gotowka"
+  },
+  other_account: {
+    label: "inne konto",
+    reason: "platnosc poza importowanym kontem"
+  },
+  ignored: {
+    label: "pominieto",
+    reason: "pozycja pominieta w rozliczeniach"
+  }
+};
+
+function externalPaymentMethod(method) {
+  return EXTERNAL_PAYMENT_METHODS[method] ? method : "other_account";
+}
+
+function buildExternalPaymentMatch(session, method, reasons = []) {
+  const safeMethod = externalPaymentMethod(method);
+  const methodInfo = EXTERNAL_PAYMENT_METHODS[safeMethod];
+
+  return {
+    id: `external-${safeMethod}-${slugify(session.id)}`,
+    kind: safeMethod === "ignored" ? "ignored" : "external",
+    status: safeMethod === "ignored" ? "ignored" : "confirmed",
+    confidence: methodInfo.label,
+    score: 100,
+    reasons: uniqueReasons([methodInfo.reason, ...reasons]),
+    transaction: null,
+    externalPayment: {
+      method: safeMethod,
+      label: methodInfo.label
+    },
+    targets: [matchTargetFromSession(session)],
+    delta: 0,
+    confirmedAt: new Date().toISOString().slice(0, 16).replace("T", " ")
   };
 }
 
@@ -1022,12 +1087,14 @@ function alternativePaymentCandidates(session, transactions, usedTransactionIds,
     .filter((transaction) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
     .map((transaction) => {
       const details = scoreTransactionForSession(transaction, session, aliases);
+      const identity = patientIdentityScore(session.patientName, transaction, aliases);
       const distance = dateDistanceDays(session.dateLabel, transaction.transactionDate);
       const hints = titleDateHints(transaction);
       const titleDateMatch = sessionDateKey && hints.includes(sessionDateKey);
       const nearby = distance >= -3 && distance <= 7;
+      const hasPatientSignal = identity.score >= 24;
 
-      if (!titleDateMatch && !nearby) {
+      if ((!titleDateMatch && !hasPatientSignal) || (!titleDateMatch && !nearby)) {
         return null;
       }
 
@@ -1063,17 +1130,44 @@ function alternativePaymentCandidates(session, transactions, usedTransactionIds,
     }));
 }
 
+function findPaymentRule(session, rules = []) {
+  const patientKey = normalizeSearchValue(session.patientName);
+  return (rules || []).find((rule) => (
+    rule.patientKey === patientKey &&
+    rule.method &&
+    rule.method !== "ignored"
+  ));
+}
+
 function generatePaymentMatches(store) {
   const sessions = collectSessions(store);
   const transactions = collectTransactions(store);
   const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
+  const paymentRules = Array.isArray(store.paymentRules) ? store.paymentRules : [];
   const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
   const confirmedSessionIds = new Set(confirmedMatches.flatMap((match) => (match.targets || []).map((target) => target.id)));
   const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
-  const availableSessions = sessions.filter((session) => !session.paid && !confirmedSessionIds.has(session.id));
   const matches = [...confirmedMatches];
   const usedSessionIds = new Set(confirmedSessionIds);
   const usedTransactionIds = new Set(confirmedTransactionIds);
+
+  sessions
+    .filter((session) => !session.paid && !usedSessionIds.has(session.id))
+    .forEach((session) => {
+      const rule = findPaymentRule(session, paymentRules);
+      if (!rule) {
+        return;
+      }
+
+      const match = buildExternalPaymentMatch(session, rule.method, [
+        `regula pacjenta: ${rule.label || EXTERNAL_PAYMENT_METHODS[externalPaymentMethod(rule.method)].label}`
+      ]);
+      applyExternalPaymentToTarget(store, match.targets[0], rule.method, match.id);
+      matches.push(match);
+      usedSessionIds.add(session.id);
+    });
+
+  const availableSessions = sessions.filter((session) => !session.paid && !usedSessionIds.has(session.id));
 
   const singleCandidates = [];
   transactions.forEach((transaction) => {
@@ -1260,6 +1354,93 @@ function applyPaymentToTarget(store, target, transaction, matchId) {
   }
 }
 
+function applyExternalPaymentToTarget(store, target, method, matchId) {
+  const safeMethod = externalPaymentMethod(method);
+  const methodInfo = EXTERNAL_PAYMENT_METHODS[safeMethod];
+  const paidAt = new Date().toISOString().slice(0, 10);
+
+  if (target.type === "importRow") {
+    const batch = (store.imports || []).find((item) => item.id === target.importId);
+    const row = batch?.rows?.find((item) => item.id === target.rowId);
+    if (row) {
+      if (safeMethod === "ignored") {
+        row.paymentIgnored = true;
+        row.paymentStatus = methodInfo.label;
+        row.paymentIgnoredAt = paidAt;
+      } else {
+        row.paymentConfirmed = true;
+        row.paymentStatus = methodInfo.label;
+        row.externalPaymentMethod = safeMethod;
+        row.externalPaidAt = paidAt;
+      }
+
+      row.paymentMatchId = matchId;
+    }
+
+    if (target.linkedVisitId) {
+      const visit = (store.visits || []).find((item) => item.id === target.linkedVisitId);
+      if (visit) {
+        visit.payment = {
+          ...visit.payment,
+          status: safeMethod === "ignored" ? "ignored" : "paid",
+          statusLabel: methodInfo.label,
+          method: safeMethod,
+          paidAt,
+          paymentMatchId: matchId
+        };
+      }
+    }
+
+    return;
+  }
+
+  const visit = (store.visits || []).find((item) => item.id === target.visitId);
+  if (visit) {
+    visit.payment = {
+      ...visit.payment,
+      status: safeMethod === "ignored" ? "ignored" : "paid",
+      statusLabel: methodInfo.label,
+      method: safeMethod,
+      paidAt,
+      paymentMatchId: matchId
+    };
+  }
+}
+
+function addPaymentRuleFromSession(store, session, method) {
+  const safeMethod = externalPaymentMethod(method);
+  if (safeMethod === "ignored") {
+    return 0;
+  }
+
+  if (!Array.isArray(store.paymentRules)) {
+    store.paymentRules = [];
+  }
+
+  const patientName = String(session.patientName || "").trim();
+  const patientKey = normalizeSearchValue(patientName);
+  if (!patientKey) {
+    return 0;
+  }
+
+  const exists = store.paymentRules.some((rule) => rule.patientKey === patientKey && rule.method === safeMethod);
+  if (exists) {
+    return 0;
+  }
+
+  const methodInfo = EXTERNAL_PAYMENT_METHODS[safeMethod];
+  store.paymentRules.push({
+    id: `payment-rule-${slugify(`${patientKey}-${safeMethod}`)}-${Date.now()}`,
+    patientName,
+    patientKey,
+    method: safeMethod,
+    label: methodInfo.label,
+    createdAt: new Date().toISOString().slice(0, 16).replace("T", " ")
+  });
+
+  return 1;
+}
+
 function addPayerAliasesFromMatch(store, match) {
   if (!match?.transaction?.counterparty) {
     return 0;
@@ -1347,6 +1528,34 @@ function confirmManualPaymentMatch(store, targetId, transactionId, rememberPayer
   store.paymentMatches.matches.push(match);
 
   return { match, aliasesAdded };
+}
+
+function confirmExternalPayment(store, targetId, method, rememberPatient = false) {
+  const session = collectSessions(store).find((item) => item.id === targetId);
+  if (!session) {
+    return null;
+  }
+
+  const safeMethod = externalPaymentMethod(method);
+  const match = buildExternalPaymentMatch(session, safeMethod, [
+    rememberPatient ? "zapamietano sposob platnosci pacjenta" : "recznie oznaczona platnosc"
+  ]);
+  const rulesAdded = rememberPatient ? addPaymentRuleFromSession(store, session, safeMethod) : 0;
+
+  applyExternalPaymentToTarget(store, match.targets[0], safeMethod, match.id);
+
+  if (!store.paymentMatches) {
+    store.paymentMatches = { generatedAt: null, summary: {}, matches: [] };
+  }
+
+  store.paymentMatches.matches = (store.paymentMatches.matches || [])
+    .filter((item) => item.id !== match.id);
+
+  if (safeMethod !== "ignored") {
+    store.paymentMatches.matches.push(match);
+  }
+
+  return { match, rulesAdded };
 }
 
 function confirmPaymentMatchInStore(store, match) {
@@ -1629,6 +1838,37 @@ const server = http.createServer(async (req, res) => {
       });
     } catch (error) {
       sendJson(res, 400, { error: "Unable to confirm manual payment match" });
+    }
+
+    return;
+  }
+
+  if (pathname === "/api/reconciliation/external-payment" && req.method === "POST") {
+    try {
+      const payload = await collectRequestBody(req);
+      const data = readData();
+      const result = confirmExternalPayment(
+        data,
+        String(payload.targetId || ""),
+        String(payload.method || "other_account"),
+        Boolean(payload.rememberPatient)
+      );
+
+      if (!result) {
+        sendJson(res, 404, { error: "External payment target not found" });
+        return;
+      }
+
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, {
+        ok: true,
+        rulesAdded: result.rulesAdded,
+        paymentMatches: data.paymentMatches
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to mark external payment" });
     }
 
     return;

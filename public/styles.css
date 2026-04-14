@@ -440,6 +440,17 @@ p {
   font-size: 0.78rem;
 }
 
+.external-payment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.external-payment-actions button {
+  padding: 7px 9px;
+  border-radius: 10px;
+}
+
 .reconciliation-result {
   justify-items: start;
 }

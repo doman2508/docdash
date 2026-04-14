@@ -848,9 +848,12 @@ function renderReconciliation() {
       const targetCopy = (match.targets || [])
         .map((target) => `${target.dateLabel} ${target.time || ""} - ${target.patientName} - ${formatCurrency(target.amount)}`)
         .join("<br />");
-      const transactionCopy = match.transaction
-        ? `${match.transaction.transactionDate} - ${match.transaction.counterparty}<br />${match.transaction.title || "bez tytulu"}`
-        : "Nie znaleziono pasujacego wplywu";
+      const firstTargetId = match.targets?.[0]?.id || "";
+      const transactionCopy = match.externalPayment
+        ? `Platnosc poza bankiem: ${match.externalPayment.label}`
+        : match.transaction
+          ? `${match.transaction.transactionDate} - ${match.transaction.counterparty}<br />${match.transaction.title || "bez tytulu"}`
+          : "Nie znaleziono pasujacego wplywu";
       const reasonsCopy = (match.reasons || [])
         .slice(0, 5)
         .map((reason) => `<span>${reason}</span>`)
@@ -866,19 +869,41 @@ function renderReconciliation() {
         .join("");
       const badgeClass =
         match.status === "confirmed" ? "success" : match.status === "missing" ? "warning" : match.confidence === "pewne" ? "success" : "neutral";
+      const paymentExceptionActions =
+        match.status === "missing"
+          ? `
+            <div class="external-payment-actions">
+              <button class="secondary external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="cash" data-remember="false">Gotowka</button>
+              <button class="secondary external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="other_account" data-remember="false">Inne konto</button>
+              <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="ignored" data-remember="false">Pomin</button>
+              <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="cash" data-remember="true">Gotowka stale</button>
+              <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="other_account" data-remember="true">Inne konto stale</button>
+            </div>
+          `
+          : "";
       const actionsCopy =
         match.transaction && match.status !== "confirmed"
           ? `
             <button class="primary confirm-payment-match" type="button" data-match-id="${match.id}">Potwierdz</button>
             <button class="secondary remember-payer-match" type="button" data-match-id="${match.id}">Potwierdz + zapamietaj platnika</button>
           `
-          : "";
+          : paymentExceptionActions;
 
       return `
         <article class="reconciliation-item ${match.status}">
           <div class="reconciliation-target">
             <strong>${targetCopy}</strong>
-            <span>${match.kind === "group" ? "platnosc zbiorcza" : match.kind === "missing" ? "brak dopasowania" : "pojedyncza sesja"}</span>
+            <span>${
+              match.kind === "group"
+                ? "platnosc zbiorcza"
+                : match.kind === "missing"
+                  ? "brak dopasowania"
+                  : match.kind === "external"
+                    ? "platnosc poza bankiem"
+                    : match.kind === "ignored"
+                      ? "pominieto"
+                      : "pojedyncza sesja"
+            }</span>
           </div>
           <div class="reconciliation-transaction">
             <span>${transactionCopy}</span>
@@ -1182,6 +1207,35 @@ async function confirmManualPaymentMatch(targetId, transactionId) {
     result.aliasesAdded
       ? `Wplyw podpiety. Zapamietano ${result.aliasesAdded} powiazanie platnika.`
       : "Wplyw podpiety do sesji.",
+    "success"
+  );
+}
+
+async function confirmExternalPayment(targetId, method, rememberPatient = false) {
+  const methodCopy = method === "cash" ? "gotowke" : method === "ignored" ? "pomijam pozycje" : "platnosc z innego konta";
+  setSaveStatus(`${methodCopy.charAt(0).toUpperCase()}${methodCopy.slice(1)}...`, "pending");
+
+  const response = await fetch("/api/reconciliation/external-payment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetId, method, rememberPatient })
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie oznaczyc tej pozycji.", "error");
+    return;
+  }
+
+  const result = await response.json();
+  await refreshBootstrapData();
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus(
+    rememberPatient && result.rulesAdded
+      ? "Pozycja oznaczona i zapamietano sposob platnosci pacjenta."
+      : method === "ignored"
+        ? "Pozycja pominieta w rozliczeniach."
+        : "Pozycja oznaczona jako rozliczona poza importowanym kontem.",
     "success"
   );
 }
@@ -1495,6 +1549,12 @@ function attachActions() {
   document.querySelectorAll(".manual-payment-match").forEach((button) => {
     button.onclick = async () => {
       await confirmManualPaymentMatch(button.dataset.targetId, button.dataset.transactionId);
+    };
+  });
+
+  document.querySelectorAll(".external-payment-match").forEach((button) => {
+    button.onclick = async () => {
+      await confirmExternalPayment(button.dataset.targetId, button.dataset.method, button.dataset.remember === "true");
     };
   });
 }
