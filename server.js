@@ -354,9 +354,55 @@ function buildInitialChecklist() {
   ];
 }
 
+const SESSION_OUTCOMES = {
+  scheduled: {
+    label: "zaplanowana",
+    chargeable: true
+  },
+  completed: {
+    label: "odbyta",
+    chargeable: true
+  },
+  cancelled: {
+    label: "nie odbyla sie",
+    chargeable: false
+  },
+  rescheduled: {
+    label: "przeniesiona",
+    chargeable: false
+  },
+  no_show_paid: {
+    label: "no-show platny",
+    chargeable: true
+  }
+};
+
+function defaultSessionOutcome(dateLabel) {
+  const sessionDate = dateSortValue(normalizeDateLabel(dateLabel));
+  const today = dateSortValue(getCurrentDateKey());
+  return sessionDate >= today ? "scheduled" : "completed";
+}
+
+function normalizeSessionOutcome(outcome, dateLabel) {
+  return SESSION_OUTCOMES[outcome] ? outcome : defaultSessionOutcome(dateLabel);
+}
+
+function sessionOutcomeMeta(outcome, dateLabel) {
+  const key = normalizeSessionOutcome(outcome, dateLabel);
+  return {
+    key,
+    ...SESSION_OUTCOMES[key]
+  };
+}
+
+function isChargeableSessionOutcome(outcome, dateLabel) {
+  return sessionOutcomeMeta(outcome, dateLabel).chargeable;
+}
+
 function buildManualVisit(payload) {
   const dateKey = normalizeDateLabel(payload.dateLabel);
   const stage = dateKey === getCurrentDateKey() ? "today" : "planned";
+  const sessionOutcome = normalizeSessionOutcome(payload.sessionOutcome, payload.dateLabel);
 
   return {
     id: `manual-${dateKey}-${slugify(payload.patientName)}-${Date.now()}`,
@@ -368,6 +414,7 @@ function buildManualVisit(payload) {
     dateLabel: payload.dateLabel,
     time: payload.time || "brak godziny",
     status: "open",
+    sessionOutcome,
     notes: "",
     summary: "",
     closureChecklist: buildInitialChecklist(),
@@ -399,6 +446,9 @@ function updateVisit(currentVisit, patch) {
   return {
     ...currentVisit,
     ...patch,
+    sessionOutcome: patch.sessionOutcome
+      ? normalizeSessionOutcome(patch.sessionOutcome, patch.dateLabel || currentVisit.dateLabel)
+      : currentVisit.sessionOutcome,
     nextVisit: patch.nextVisit ? { ...currentVisit.nextVisit, ...patch.nextVisit } : currentVisit.nextVisit,
     payment: patch.payment ? { ...currentVisit.payment, ...patch.payment } : currentVisit.payment,
     followUp: patch.followUp ? { ...currentVisit.followUp, ...patch.followUp } : currentVisit.followUp,
@@ -408,6 +458,7 @@ function updateVisit(currentVisit, patch) {
 
 function buildImportedVisit(importRow) {
   const stage = normalizeDateLabel(importRow.dateLabel) === getCurrentDateKey() ? "today" : "planned";
+  const sessionOutcome = normalizeSessionOutcome(importRow.sessionOutcome, importRow.dateLabel);
 
   return {
     id: `workflow-${importRow.id}`,
@@ -419,6 +470,7 @@ function buildImportedVisit(importRow) {
     dateLabel: importRow.dateLabel,
     time: importRow.time || "brak godziny",
     status: "open",
+    sessionOutcome,
     notes: "",
     summary: "",
     closureChecklist: [
@@ -682,6 +734,7 @@ function mergeZlBatch(store, batch) {
       processed: existing.processed || row.processed,
       linkedVisitId: existing.linkedVisitId || row.linkedVisitId,
       processedAt: existing.processedAt || row.processedAt,
+      sessionOutcome: existing.sessionOutcome || row.sessionOutcome,
       paymentConfirmed: existing.paymentConfirmed || row.paymentConfirmed,
       bankTransactionId: existing.bankTransactionId || row.bankTransactionId,
       bankPaidAt: existing.bankPaidAt || row.bankPaidAt,
@@ -744,10 +797,17 @@ function collectSessions(store) {
   const sessions = [];
   const seenSessionKeys = new Set();
   const linkedVisitIds = new Set();
+  const visitsById = new Map((store.visits || []).map((visit) => [visit.id, visit]));
 
   (store.imports || []).forEach((batch) => {
     (batch.rows || []).forEach((row) => {
       if (isIgnoredImportRow(row)) {
+        return;
+      }
+
+      const linkedVisit = row.linkedVisitId ? visitsById.get(row.linkedVisitId) : null;
+      const outcome = linkedVisit?.sessionOutcome || row.sessionOutcome;
+      if (!isChargeableSessionOutcome(outcome, row.dateLabel)) {
         return;
       }
 
@@ -771,6 +831,8 @@ function collectSessions(store) {
         dateLabel: row.dateLabel,
         time: row.time || "",
         amount: Number(row.amount || 0),
+        sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
+        sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
         paid: isPaidImportRow(row),
         bankTransactionId: row.bankTransactionId || null
       });
@@ -786,6 +848,10 @@ function collectSessions(store) {
       return;
     }
 
+    if (!isChargeableSessionOutcome(visit.sessionOutcome, visit.dateLabel)) {
+      return;
+    }
+
     sessions.push({
       id: `visit:${visit.id}`,
       type: "visit",
@@ -794,6 +860,8 @@ function collectSessions(store) {
       dateLabel: visit.dateLabel,
       time: visit.time || "",
       amount: Number(visit.payment?.amount || 0),
+      sessionOutcome: normalizeSessionOutcome(visit.sessionOutcome, visit.dateLabel),
+      sessionOutcomeLabel: sessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel).label,
       paid: isPaidVisit(visit),
       bankTransactionId: visit.payment?.bankTransactionId || null
     });
@@ -1009,7 +1077,9 @@ function matchTargetFromSession(session) {
     patientName: session.patientName,
     dateLabel: session.dateLabel,
     time: session.time,
-    amount: session.amount
+    amount: session.amount,
+    sessionOutcome: session.sessionOutcome,
+    sessionOutcomeLabel: session.sessionOutcomeLabel
   };
 }
 
@@ -1701,6 +1771,71 @@ function confirmPaymentMatchInStore(store, match) {
   return true;
 }
 
+function syncVisitOutcomeToImports(store, visit) {
+  if (!visit?.id) {
+    return 0;
+  }
+
+  let updated = 0;
+  (store.imports || []).forEach((batch) => {
+    (batch.rows || []).forEach((row) => {
+      if (row.linkedVisitId === visit.id && row.sessionOutcome !== visit.sessionOutcome) {
+        row.sessionOutcome = visit.sessionOutcome;
+        updated += 1;
+      }
+    });
+  });
+
+  return updated;
+}
+
+function updateSessionOutcomeForTarget(store, targetId, outcome) {
+  const safeOutcome = normalizeSessionOutcome(outcome, getCurrentDateKey());
+  let updated = 0;
+  const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+
+  if (String(targetId || "").startsWith("import:")) {
+    const parts = String(targetId).split(":");
+    const importId = parts[1];
+    const rowId = parts.slice(2).join(":");
+    const batch = (store.imports || []).find((item) => item.id === importId);
+    const row = batch?.rows?.find((item) => item.id === rowId);
+
+    if (!row) {
+      return 0;
+    }
+
+    row.sessionOutcome = normalizeSessionOutcome(safeOutcome, row.dateLabel);
+    row.sessionOutcomeUpdatedAt = timestamp;
+    updated += 1;
+
+    if (row.linkedVisitId) {
+      const visit = (store.visits || []).find((item) => item.id === row.linkedVisitId);
+      if (visit) {
+        visit.sessionOutcome = normalizeSessionOutcome(safeOutcome, visit.dateLabel);
+        updated += 1;
+      }
+    }
+
+    return updated;
+  }
+
+  if (!String(targetId || "").startsWith("visit:")) {
+    return 0;
+  }
+
+  const visitId = String(targetId).slice("visit:".length);
+  const visit = (store.visits || []).find((item) => item.id === visitId);
+  if (!visit) {
+    return 0;
+  }
+
+  visit.sessionOutcome = normalizeSessionOutcome(safeOutcome, visit.dateLabel);
+  updated += 1;
+  updated += syncVisitOutcomeToImports(store, visit);
+  return updated;
+}
+
 function collectRequestBody(req, maxBytes = 5 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -2038,6 +2173,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/api/reconciliation/session-outcome" && req.method === "POST") {
+    try {
+      const payload = await collectRequestBody(req);
+      const data = readData();
+      const updated = updateSessionOutcomeForTarget(
+        data,
+        String(payload.targetId || ""),
+        String(payload.outcome || "completed")
+      );
+
+      if (!updated) {
+        sendJson(res, 404, { error: "Session target not found" });
+        return;
+      }
+
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, {
+        ok: true,
+        updated,
+        paymentMatches: data.paymentMatches
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to update session outcome" });
+    }
+
+    return;
+  }
+
   if (pathname === "/api/reconciliation/confirm-confident" && req.method === "POST") {
     try {
       const data = readData();
@@ -2070,6 +2235,7 @@ const server = http.createServer(async (req, res) => {
       const visit = buildManualVisit(payload);
       data.visits.push(visit);
       data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
       writeData(data);
       sendJson(res, 201, visit);
     } catch (error) {
@@ -2093,7 +2259,9 @@ const server = http.createServer(async (req, res) => {
 
       const updatedVisit = updateVisit(data.visits[visitIndex], patch);
       data.visits[visitIndex] = updatedVisit;
+      syncVisitOutcomeToImports(data, updatedVisit);
       data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
       writeData(data);
       sendJson(res, 200, updatedVisit);
     } catch (error) {
@@ -2138,6 +2306,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
       writeData(data);
       sendJson(res, 200, row);
     } catch (error) {

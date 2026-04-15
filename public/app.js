@@ -114,6 +114,79 @@ function normalizeSearchText(value) {
     .replace(/\u0142/g, "l");
 }
 
+const SESSION_OUTCOME_META = {
+  scheduled: {
+    label: "zaplanowana",
+    chargeable: true,
+    hint: "Sesja dalej zostaje w rozliczeniach, bo pacjent moze zaplacic z gory."
+  },
+  completed: {
+    label: "odbyta",
+    chargeable: true,
+    hint: "To normalna sesja do rozliczenia."
+  },
+  cancelled: {
+    label: "nie odbyla sie",
+    chargeable: false,
+    hint: "Ta pozycja nie buduje dlugu ani zaleglosci."
+  },
+  rescheduled: {
+    label: "przeniesiona",
+    chargeable: false,
+    hint: "Sesja wypada z rozliczen, bo rozliczana bedzie nowa data."
+  },
+  no_show_paid: {
+    label: "no-show platny",
+    chargeable: true,
+    hint: "Sesja sie nie odbyla, ale oplata dalej obowiazuje."
+  }
+};
+
+function defaultSessionOutcome(dateLabel) {
+  const sessionDate = getDateSortValue(dateLabel);
+  const today = getDateSortValue(getCurrentDateKey());
+  return sessionDate >= today ? "scheduled" : "completed";
+}
+
+function normalizeSessionOutcome(outcome, dateLabel) {
+  return SESSION_OUTCOME_META[outcome] ? outcome : defaultSessionOutcome(dateLabel);
+}
+
+function getSessionOutcomeMeta(outcome, dateLabel) {
+  const key = normalizeSessionOutcome(outcome, dateLabel);
+  return {
+    key,
+    ...SESSION_OUTCOME_META[key]
+  };
+}
+
+function isChargeableOutcome(outcome, dateLabel) {
+  return getSessionOutcomeMeta(outcome, dateLabel).chargeable;
+}
+
+function isVisitChargeable(visit) {
+  return visit && visit.payment?.status !== "ignored" && isChargeableOutcome(visit.sessionOutcome, visit.dateLabel);
+}
+
+function sessionOutcomeBadgeTone(outcome, dateLabel) {
+  const meta = getSessionOutcomeMeta(outcome, dateLabel);
+
+  if (!meta.chargeable) {
+    return "neutral";
+  }
+
+  return meta.key === "scheduled" ? "neutral" : "success";
+}
+
+function updateSessionOutcomeHint(outcome, dateLabel) {
+  const hint = document.getElementById("visit-session-outcome-hint");
+  if (!hint) {
+    return;
+  }
+
+  hint.textContent = getSessionOutcomeMeta(outcome, dateLabel).hint;
+}
+
 function getDateSortValue(label) {
   const normalized = normalizeDateKey(label);
   const match = String(normalized || "").match(/^(\d{1,2})\.(\d{2})\.(\d{4})$/);
@@ -216,8 +289,9 @@ function getPatients() {
     .map(([patientName, payload]) => {
       const visits = payload.visits;
       const importedRows = payload.importedRows;
-      const totalDue = visits.reduce((sum, visit) => sum + visit.payment.amount, 0);
-      const totalPaid = visits
+      const chargeableVisits = visits.filter((visit) => isVisitChargeable(visit));
+      const totalDue = chargeableVisits.reduce((sum, visit) => sum + visit.payment.amount, 0);
+      const totalPaid = chargeableVisits
         .filter((visit) => visit.payment.status === "paid")
         .reduce((sum, visit) => sum + visit.payment.amount, 0);
       const pending = totalDue - totalPaid;
@@ -296,8 +370,9 @@ function getTodayMetrics() {
   const workflowToday = getActiveDateWorkflowVisits();
   const importedToday = getActiveDateImportRows();
   const completed = workflowToday.filter((visit) => visit.status === "closed").length;
-  const due = workflowToday.reduce((sum, visit) => sum + visit.payment.amount, 0);
-  const paid = workflowToday
+  const chargeableToday = workflowToday.filter((visit) => isVisitChargeable(visit));
+  const due = chargeableToday.reduce((sum, visit) => sum + visit.payment.amount, 0);
+  const paid = chargeableToday
     .filter((visit) => visit.payment.status === "paid")
     .reduce((sum, visit) => sum + visit.payment.amount, 0);
   const openItems = buildInboxItems(state.activeDateKey).length + importedToday.length;
@@ -311,15 +386,16 @@ function getWorkingDayLabel() {
 
 function getMonthlyStats() {
   const visits = state.data.visits;
-  const paid = visits
+  const chargeableVisits = visits.filter((visit) => isVisitChargeable(visit));
+  const paid = chargeableVisits
     .filter((visit) => visit.payment.status === "paid")
     .reduce((sum, visit) => sum + visit.payment.amount, 0);
-  const due = visits.reduce((sum, visit) => sum + visit.payment.amount, 0);
+  const due = chargeableVisits.reduce((sum, visit) => sum + visit.payment.amount, 0);
   const unscheduled = visits.filter((visit) => visit.nextVisit.status !== "scheduled").length;
-  const pendingPayments = visits.filter((visit) => visit.payment.status !== "paid").length;
+  const pendingPayments = chargeableVisits.filter((visit) => visit.payment.status !== "paid").length;
   const closed = visits.filter((visit) => visit.status === "closed").length;
   const closureRate = Math.round((closed / visits.length) * 100);
-  const average = visits.length ? Math.round(due / visits.length) : 0;
+  const average = chargeableVisits.length ? Math.round(due / chargeableVisits.length) : 0;
 
   return {
     monthLabel: state.data.meta.monthLabel,
@@ -475,7 +551,7 @@ function buildInboxItems(dateKey = null) {
       return;
     }
 
-    if (visit.payment.status !== "paid" && !followUp.paymentReminderSent) {
+    if (isVisitChargeable(visit) && visit.payment.status !== "paid" && !followUp.paymentReminderSent) {
       items.push({
         id: `${visit.id}-payment-reminder`,
         visitId: visit.id,
@@ -487,7 +563,7 @@ function buildInboxItems(dateKey = null) {
       });
     }
 
-    if (visit.payment.documentType !== "none" && !followUp.documentReady) {
+    if (isVisitChargeable(visit) && visit.payment.documentType !== "none" && !followUp.documentReady) {
       items.push({
         id: `${visit.id}-document`,
         visitId: visit.id,
@@ -546,6 +622,7 @@ function renderInbox(dateKey = null) {
 function renderVisitForm() {
   const visit = getSelectedVisit();
   const badge = document.getElementById("visit-status-badge");
+  const outcomeMeta = getSessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel);
 
   document.getElementById("visit-heading").textContent = `${visit.patientName} - ${visit.dateLabel} - ${visit.time}`;
   badge.textContent = visit.status === "closed" ? "zamknieta" : "wymaga akcji";
@@ -555,6 +632,8 @@ function renderVisitForm() {
   document.getElementById("visit-summary").value = visit.summary;
   document.getElementById("visit-next-note").value = visit.nextVisit.note;
   document.getElementById("visit-next-planned").value = visit.nextVisit.plannedLabel;
+  updateSessionOutcomeHint(outcomeMeta.key, visit.dateLabel);
+  setChoiceState("session-outcome", outcomeMeta.key);
   setChoiceState("next-status", visit.nextVisit.status);
 }
 
@@ -644,6 +723,7 @@ function renderPatients() {
     .map((item) => {
       if (item.type === "visit") {
         const visit = item.data;
+        const outcomeMeta = getSessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel);
         return `
           <article class="history-item">
             <div>
@@ -651,6 +731,7 @@ function renderPatients() {
               <span>${visit.summary || "Brak podsumowania"}</span>
             </div>
             <div class="inbox-actions">
+              <span class="badge ${sessionOutcomeBadgeTone(visit.sessionOutcome, visit.dateLabel)}">${outcomeMeta.label}</span>
               <span class="badge ${visit.payment.status === "paid" ? "success" : "warning"}">${visit.payment.statusLabel}</span>
               <button class="ghost history-open" type="button" data-history-visit="${visit.id}">Otworz wizyte</button>
             </div>
@@ -823,6 +904,7 @@ function renderBilling() {
   setChoiceState("payment-document", visit.payment.documentType);
 
   document.getElementById("payment-list").innerHTML = state.data.visits
+    .filter((entry) => isVisitChargeable(entry))
     .filter((entry) => entry.payment.status !== "paid")
     .map((entry) => {
       return `
@@ -840,7 +922,7 @@ function renderBilling() {
   document.getElementById("billing-summary").innerHTML = `
     <div><span>Przychod miesieczny</span><strong>${formatCurrency(monthly.due)}</strong></div>
     <div><span>Do odzyskania</span><strong>${formatCurrency(monthly.pending)}</strong></div>
-    <div><span>Oplacone sesje</span><strong>${state.data.visits.filter((entry) => entry.payment.status === "paid").length}</strong></div>
+    <div><span>Oplacone sesje</span><strong>${state.data.visits.filter((entry) => isVisitChargeable(entry) && entry.payment.status === "paid").length}</strong></div>
   `;
 
   renderReconciliation();
@@ -948,7 +1030,10 @@ function renderPatientReconciliation() {
                 ? filteredSessions
                     .map((session) => `
                       <button class="ledger-session ${session.id === state.reconciliationSelectedSessionId ? "selected" : ""}" type="button" data-ledger-session-id="${session.id}">
-                        <strong>${session.dateLabel} ${session.time || ""}</strong>
+                        <div>
+                          <strong>${session.dateLabel} ${session.time || ""}</strong>
+                          <span>${session.sessionOutcomeLabel || "do rozliczenia"}</span>
+                        </div>
                         <span>${formatCurrency(session.amount)}</span>
                       </button>
                     `)
@@ -959,6 +1044,11 @@ function renderPatientReconciliation() {
           ${
             selectedSession
               ? `
+                <div class="external-payment-actions ledger-exception-actions">
+                  <button class="ghost ledger-session-outcome" type="button" data-target-id="${selectedSession.id}" data-outcome="cancelled">Nie odbyla sie</button>
+                  <button class="ghost ledger-session-outcome" type="button" data-target-id="${selectedSession.id}" data-outcome="rescheduled">Przeniesiona</button>
+                  <button class="ghost ledger-session-outcome" type="button" data-target-id="${selectedSession.id}" data-outcome="no_show_paid">No-show platny</button>
+                </div>
                 <div class="external-payment-actions ledger-exception-actions">
                   <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="false">Gotowka</button>
                   <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="false">Inne konto</button>
@@ -1163,8 +1253,10 @@ async function saveVisit(patch, message) {
   }
 
   const updatedVisit = await response.json();
-  state.data.visits = state.data.visits.map((entry) => (entry.id === updatedVisit.id ? updatedVisit : entry));
-  state.data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+  await refreshBootstrapData();
+  await refreshOpenPatientReconciliation();
+  state.selectedVisitId = updatedVisit.id;
+  state.selectedPatientName = updatedVisit.patientName;
   setSaveStatus(message, "success");
   renderAll();
 }
@@ -1501,6 +1593,35 @@ async function confirmExternalPayment(targetId, method, rememberPatient = false)
   );
 }
 
+async function updateReconciliationSessionOutcome(targetId, outcome) {
+  const outcomeMeta = getSessionOutcomeMeta(outcome, getCurrentDateKey());
+  setSaveStatus(`Oznaczam sesje jako ${outcomeMeta.label}...`, "pending");
+
+  const response = await fetch("/api/reconciliation/session-outcome", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetId, outcome })
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie zaktualizowac wyniku sesji.", "error");
+    return;
+  }
+
+  await refreshBootstrapData();
+  await refreshOpenPatientReconciliation();
+  renderAll();
+  setActiveView("billing");
+  setSaveStatus(
+    outcome === "cancelled"
+      ? "Sesja oznaczona jako nieodbyta i wypadla z zaleglosci."
+      : outcome === "rescheduled"
+        ? "Sesja oznaczona jako przeniesiona i usunieta z rozliczen."
+        : "Sesja oznaczona jako no-show platny.",
+    "success"
+  );
+}
+
 async function confirmConfidentPaymentMatches() {
   setSaveStatus("Potwierdzam pewne dopasowania...", "pending");
 
@@ -1561,6 +1682,7 @@ async function createManualVisit() {
 function collectVisitPatch() {
   const visit = getSelectedVisit();
   return {
+    sessionOutcome: document.querySelector('[data-choice-group="session-outcome"].active').dataset.choiceValue,
     notes: document.getElementById("visit-notes").value,
     summary: document.getElementById("visit-summary").value,
     nextVisit: {
@@ -1591,30 +1713,59 @@ function collectBillingPatch() {
 }
 
 function buildChecklist(visit, visitPatch, paymentPatch) {
+  const outcome = getSessionOutcomeMeta(visitPatch?.sessionOutcome || visit.sessionOutcome, visit.dateLabel);
   const nextVisit = visitPatch?.nextVisit || visit.nextVisit;
   const payment = paymentPatch?.payment || visit.payment;
+  const summaryText = String(visitPatch?.summary ?? visit.summary ?? "").trim();
+  const paymentNeeded = outcome.chargeable && payment.status !== "ignored";
 
   return [
+    {
+      label:
+        outcome.key === "completed"
+          ? "Sesja oznaczona jako odbyta"
+          : outcome.key === "cancelled"
+            ? "Sesja oznaczona jako nieodbyta"
+            : outcome.key === "rescheduled"
+              ? "Sesja oznaczona jako przeniesiona"
+              : outcome.key === "no_show_paid"
+                ? "Sesja oznaczona jako no-show platny"
+                : "Wynik sesji jeszcze nieoznaczony",
+      done: outcome.key !== "scheduled"
+    },
     { label: "Notatka robocza zapisana", done: true },
-    { label: "Podsumowanie wizyty uzupelnione", done: true },
+    { label: summaryText ? "Podsumowanie wizyty uzupelnione" : "Brak podsumowania wizyty", done: Boolean(summaryText) },
     {
       label: nextVisit.status === "scheduled" ? "Kolejna wizyta ustawiona" : "Brak wpisanej kolejnej wizyty w ZL",
       done: nextVisit.status === "scheduled"
     },
     {
-      label: payment.status === "paid" ? `Platnosc ${formatCurrency(payment.amount)} potwierdzona` : `Platnosc ${formatCurrency(payment.amount)} nadal oczekuje`,
-      done: payment.status === "paid"
+      label: !paymentNeeded
+        ? "Ta sesja nie buduje naleznosci"
+        : payment.status === "paid"
+          ? `Platnosc ${formatCurrency(payment.amount)} potwierdzona`
+          : `Platnosc ${formatCurrency(payment.amount)} nadal oczekuje`,
+      done: !paymentNeeded || payment.status === "paid"
     },
     {
-      label: payment.documentIssued ? "Dokument sprzedazy wystawiony" : "Dokument sprzedazy nie wystawiony",
-      done: payment.documentIssued
+      label: !paymentNeeded
+        ? "Dokument sprzedazy nie jest potrzebny"
+        : payment.documentIssued
+          ? "Dokument sprzedazy wystawiony"
+          : "Dokument sprzedazy nie wystawiony",
+      done: !paymentNeeded || payment.documentIssued
     }
   ];
 }
 
 function attachActions() {
   document.querySelectorAll("[data-choice-group]").forEach((button) => {
-    button.onclick = () => setChoiceState(button.dataset.choiceGroup, button.dataset.choiceValue);
+    button.onclick = () => {
+      setChoiceState(button.dataset.choiceGroup, button.dataset.choiceValue);
+      if (button.dataset.choiceGroup === "session-outcome") {
+        updateSessionOutcomeHint(button.dataset.choiceValue, getSelectedVisit()?.dateLabel);
+      }
+    };
   });
 
   const openCreateButton = document.getElementById("open-create-visit");
@@ -1871,6 +2022,12 @@ function attachActions() {
   document.querySelectorAll(".external-payment-match").forEach((button) => {
     button.onclick = async () => {
       await confirmExternalPayment(button.dataset.targetId, button.dataset.method, button.dataset.remember === "true");
+    };
+  });
+
+  document.querySelectorAll(".ledger-session-outcome").forEach((button) => {
+    button.onclick = async () => {
+      await updateReconciliationSessionOutcome(button.dataset.targetId, button.dataset.outcome);
     };
   });
 }

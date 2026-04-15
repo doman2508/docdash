@@ -203,6 +203,18 @@
               </div>
 
               <div class="form-section">
+                <label>Wynik sesji</label>
+                <div class="choice-row">
+                  <button class="choice" data-choice-group="session-outcome" data-choice-value="scheduled" type="button">Zaplanowana</button>
+                  <button class="choice" data-choice-group="session-outcome" data-choice-value="completed" type="button">Odbyta</button>
+                  <button class="choice" data-choice-group="session-outcome" data-choice-value="cancelled" type="button">Nie odbyla sie</button>
+                  <button class="choice" data-choice-group="session-outcome" data-choice-value="rescheduled" type="button">Przeniesiona</button>
+                  <button class="choice" data-choice-group="session-outcome" data-choice-value="no_show_paid" type="button">No-show platny</button>
+                </div>
+                <p class="field-hint" id="visit-session-outcome-hint"></p>
+              </div>
+
+              <div class="form-section">
                 <label>Status</label>
                 <div class="choice-row">
                   <button class="choice" data-choice-group="next-status" data-choice-value="scheduled" type="button">Potwierdzona</button>
