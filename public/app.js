@@ -943,7 +943,10 @@ function renderPatientReconciliation() {
   }
 
   const allSessions = ledger.sessions || [];
+  const settledSessions = ledger.settledSessions || [];
   const allTransactions = ledger.transactions || [];
+  const usedTransactions = ledger.usedTransactions || [];
+  const summary = ledger.summary || {};
   if (!allSessions.some((session) => session.id === state.reconciliationSelectedSessionId)) {
     state.reconciliationSelectedSessionId = allSessions[0]?.id || null;
   }
@@ -985,7 +988,7 @@ function renderPatientReconciliation() {
   });
   const sessionCopy = selectedSession
     ? `${selectedSession.dateLabel} ${selectedSession.time || ""} - ${formatCurrency(selectedSession.amount)}`
-    : "Wybierz sesje";
+    : "Brak otwartej sesji";
 
   panel.hidden = false;
   panel.innerHTML = `
@@ -997,6 +1000,35 @@ function renderPatientReconciliation() {
           <span>Wybrana sesja: ${sessionCopy}</span>
         </div>
         <button class="ghost close-patient-reconciliation" type="button">Zamknij</button>
+      </div>
+
+      <div class="ledger-balance-grid">
+        <article class="ledger-balance-card">
+          <span>Sesje lacznie</span>
+          <strong>${summary.totalSessions || 0}</strong>
+        </article>
+        <article class="ledger-balance-card">
+          <span>Otwarte</span>
+          <strong>${summary.openSessions || 0}</strong>
+          <small>${formatCurrency(summary.openAmount || 0)}</small>
+        </article>
+        <article class="ledger-balance-card">
+          <span>Rozliczone</span>
+          <strong>${summary.settledSessions || 0}</strong>
+          <small>${formatCurrency(summary.settledAmount || 0)}</small>
+        </article>
+        <article class="ledger-balance-card">
+          <span>Wolne wplywy</span>
+          <strong>${summary.availableTransactions || 0}</strong>
+        </article>
+        <article class="ledger-balance-card">
+          <span>Wykorzystane wplywy</span>
+          <strong>${summary.usedTransactions || 0}</strong>
+        </article>
+        <article class="ledger-balance-card">
+          <span>Poza bankiem</span>
+          <strong>${summary.externalSettledSessions || 0}</strong>
+        </article>
       </div>
 
       <div class="ledger-filter-bar">
@@ -1087,6 +1119,62 @@ function renderPatientReconciliation() {
                     `)
                     .join("")
                 : `<div class="empty-state">Brak platnosci w tym filtrze.</div>`
+            }
+          </div>
+        </section>
+      </div>
+
+      <div class="ledger-history-grid">
+        <section>
+          <div class="ledger-column-header">
+            <strong>Juz rozliczone sesje</strong>
+            <span>${settledSessions.length}</span>
+          </div>
+          <div class="ledger-history-list">
+            ${
+              settledSessions.length
+                ? settledSessions
+                    .map((session) => `
+                      <article class="ledger-history-item">
+                        <div>
+                          <strong>${session.dateLabel} ${session.time || ""}</strong>
+                          <span>${session.paymentStatusLabel || "oplacone"}</span>
+                        </div>
+                        <div class="ledger-history-meta">
+                          <strong>${formatCurrency(session.amount)}</strong>
+                          <span>${session.paidAt || session.paymentMethod || ""}</span>
+                        </div>
+                      </article>
+                    `)
+                    .join("")
+                : `<div class="empty-state">Brak rozliczonych sesji dla tego pacjenta.</div>`
+            }
+          </div>
+        </section>
+
+        <section>
+          <div class="ledger-column-header">
+            <strong>Juz wykorzystane wplywy</strong>
+            <span>${usedTransactions.length}</span>
+          </div>
+          <div class="ledger-history-list">
+            ${
+              usedTransactions.length
+                ? usedTransactions
+                    .map((transaction) => `
+                      <article class="ledger-history-item">
+                        <div>
+                          <strong>${transaction.transactionDate} - ${transaction.counterparty}</strong>
+                          <span>${transaction.title || "bez tytulu"}</span>
+                          <small>${(transaction.matchedTargets || []).map((target) => `${target.dateLabel} ${target.time || ""}`).join(", ")}</small>
+                        </div>
+                        <div class="ledger-history-meta">
+                          <strong>${formatCurrency(transaction.amount)}</strong>
+                        </div>
+                      </article>
+                    `)
+                    .join("")
+                : `<div class="empty-state">Brak wykorzystanych wplywow w tym pacjencie.</div>`
             }
           </div>
         </section>

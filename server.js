@@ -834,7 +834,11 @@ function collectSessions(store) {
         sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
         sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
         paid: isPaidImportRow(row),
-        bankTransactionId: row.bankTransactionId || null
+        bankTransactionId: row.bankTransactionId || null,
+        paymentMethod: row.externalPaymentMethod || (row.bankTransactionId ? "transfer" : null),
+        paymentStatusLabel: row.paymentStatus || (isPaidImportRow(row) ? "oplacone" : "platnosc oczekuje"),
+        paidAt: row.bankPaidAt || row.externalPaidAt || null,
+        paymentMatchId: row.paymentMatchId || null
       });
     });
   });
@@ -863,7 +867,11 @@ function collectSessions(store) {
       sessionOutcome: normalizeSessionOutcome(visit.sessionOutcome, visit.dateLabel),
       sessionOutcomeLabel: sessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel).label,
       paid: isPaidVisit(visit),
-      bankTransactionId: visit.payment?.bankTransactionId || null
+      bankTransactionId: visit.payment?.bankTransactionId || null,
+      paymentMethod: visit.payment?.method || null,
+      paymentStatusLabel: visit.payment?.statusLabel || (isPaidVisit(visit) ? "oplacone" : "platnosc oczekuje"),
+      paidAt: visit.payment?.paidAt || null,
+      paymentMatchId: visit.payment?.paymentMatchId || null
     });
   });
 
@@ -1079,7 +1087,11 @@ function matchTargetFromSession(session) {
     time: session.time,
     amount: session.amount,
     sessionOutcome: session.sessionOutcome,
-    sessionOutcomeLabel: session.sessionOutcomeLabel
+    sessionOutcomeLabel: session.sessionOutcomeLabel,
+    paymentMethod: session.paymentMethod || null,
+    paymentStatusLabel: session.paymentStatusLabel || null,
+    paidAt: session.paidAt || null,
+    paymentMatchId: session.paymentMatchId || null
   };
 }
 
@@ -1652,13 +1664,15 @@ function buildPatientReconciliation(store, patientName) {
     return null;
   }
 
-  const sessions = collectSessions(store)
-    .filter((session) => normalizeSearchValue(session.patientName) === patientKey)
-    .filter((session) => !session.paid);
+  const patientSessions = collectSessions(store)
+    .filter((session) => normalizeSearchValue(session.patientName) === patientKey);
+  const sessions = patientSessions.filter((session) => !session.paid);
+  const settledSessions = patientSessions.filter((session) => session.paid);
   const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
   const rejectedPairs = rejectedPaymentSet(store);
   const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
   const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
+  const patientSessionIds = new Set(patientSessions.map((session) => session.id));
   const transactions = collectTransactions(store)
     .filter((transaction) => !confirmedTransactionIds.has(transaction.id))
     .map((transaction) => {
@@ -1705,11 +1719,52 @@ function buildPatientReconciliation(store, patientName) {
     .filter(Boolean)
     .sort((left, right) => dateSortValue(left.transactionDate) - dateSortValue(right.transactionDate));
 
+  const usedTransactions = collectTransactions(store)
+    .filter((transaction) => Array.isArray(transaction.matchedTargets) && transaction.matchedTargets.some((targetId) => patientSessionIds.has(targetId)))
+    .map((transaction) => {
+      const targets = settledSessions
+        .filter((session) => (transaction.matchedTargets || []).includes(session.id))
+        .map(matchTargetFromSession);
+
+      return {
+        id: transaction.id,
+        transactionNo: transaction.transactionNo,
+        transactionDate: transaction.transactionDate,
+        counterparty: transaction.counterparty,
+        title: transaction.title,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        matchedTargets: targets
+      };
+    })
+    .sort((left, right) => dateSortValue(left.transactionDate) - dateSortValue(right.transactionDate));
+
+  const settledAmount = settledSessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
+  const openAmount = sessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
+  const externalSettledSessions = settledSessions.filter((session) => !session.bankTransactionId).length;
+  const patientDisplayName =
+    patientSessions[0]?.patientName ||
+    sessions[0]?.patientName ||
+    settledSessions[0]?.patientName ||
+    patientName;
+
   return {
-    patientName: sessions[0]?.patientName || patientName,
+    patientName: patientDisplayName,
     patientKey,
+    summary: {
+      totalSessions: patientSessions.length,
+      openSessions: sessions.length,
+      settledSessions: settledSessions.length,
+      openAmount,
+      settledAmount,
+      availableTransactions: transactions.length,
+      usedTransactions: usedTransactions.length,
+      externalSettledSessions
+    },
     sessions: sessions.map(matchTargetFromSession),
-    transactions
+    settledSessions: settledSessions.map(matchTargetFromSession),
+    transactions,
+    usedTransactions
   };
 }
 
