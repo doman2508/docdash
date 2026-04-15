@@ -793,6 +793,14 @@ function isIgnoredVisit(visit) {
   return visit.payment?.status === "ignored";
 }
 
+function sessionIdentityKey(session) {
+  if (!session) {
+    return "";
+  }
+
+  return `${normalizeSearchValue(session.patientName)}|${normalizeDateLabel(session.dateLabel)}|${session.time || ""}|${Number(session.amount || 0)}`;
+}
+
 function collectSessions(store) {
   const sessions = [];
   const seenSessionKeys = new Set();
@@ -811,7 +819,7 @@ function collectSessions(store) {
         return;
       }
 
-      const sessionKey = `${normalizeSearchValue(row.patientName)}|${normalizeDateLabel(row.dateLabel)}|${row.time || ""}|${Number(row.amount || 0)}`;
+      const sessionKey = sessionIdentityKey(row);
       if (seenSessionKeys.has(sessionKey)) {
         return;
       }
@@ -1781,13 +1789,73 @@ function buildPatientReconciliation(store, patientName) {
     return null;
   }
 
-  const patientSessions = collectSessions(store)
+  const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
+  const rawPatientSessions = collectSessions(store)
     .filter((session) => normalizeSearchValue(session.patientName) === patientKey);
+  const rawPatientSessionIds = new Set(rawPatientSessions.map((session) => session.id));
+  const rawPatientSessionsById = new Map(rawPatientSessions.map((session) => [session.id, session]));
+  const rawPatientSessionsByKey = new Map(rawPatientSessions.map((session) => [sessionIdentityKey(session), session]));
+  const patientConfirmedMatches = confirmedMatches.filter((match) =>
+    (match.targets || []).some((target) => {
+      if (rawPatientSessionIds.has(target.id)) {
+        return true;
+      }
+
+      const targetKey = sessionIdentityKey(target);
+      return Boolean(targetKey && rawPatientSessionsByKey.has(targetKey));
+    })
+  );
+  const patientConfirmedMatchesById = new Map(patientConfirmedMatches.map((match) => [match.id, match]));
+  const confirmedMatchBySessionId = new Map();
+  const confirmedMatchBySessionKey = new Map();
+
+  patientConfirmedMatches.forEach((match) => {
+    (match.targets || []).forEach((target) => {
+      if (target?.id) {
+        confirmedMatchBySessionId.set(target.id, match);
+      }
+
+      const targetKey = sessionIdentityKey(target);
+      if (targetKey) {
+        confirmedMatchBySessionKey.set(targetKey, match);
+      }
+    });
+  });
+
+  const patientSessions = rawPatientSessions.map((session) => {
+    const confirmedMatch =
+      confirmedMatchBySessionId.get(session.id) ||
+      confirmedMatchBySessionKey.get(sessionIdentityKey(session)) ||
+      (session.paymentMatchId ? patientConfirmedMatchesById.get(session.paymentMatchId) : null) ||
+      null;
+    const settledByConfirmedMatch = Boolean(confirmedMatch);
+    const paid = Boolean(session.paid || settledByConfirmedMatch);
+    const paymentMethod =
+      session.paymentMethod ||
+      confirmedMatch?.externalPayment?.method ||
+      (confirmedMatch?.transaction ? "transfer" : null);
+    let paymentStatusLabel = session.paymentStatusLabel;
+    if (paid && (!paymentStatusLabel || paymentStatusLabel === "platnosc oczekuje")) {
+      paymentStatusLabel = confirmedMatch?.externalPayment?.label || "oplacone";
+    }
+
+    return {
+      ...session,
+      paid,
+      bankTransactionId: session.bankTransactionId || confirmedMatch?.transaction?.id || null,
+      paymentMethod,
+      paymentStatusLabel,
+      paidAt: session.paidAt || confirmedMatch?.transaction?.transactionDate || confirmedMatch?.confirmedAt || null,
+      paymentMatchId: session.paymentMatchId || confirmedMatch?.id || null
+    };
+  });
+
+  const patientSessionsById = new Map(patientSessions.map((session) => [session.id, session]));
+  const patientSessionsByKey = new Map(patientSessions.map((session) => [sessionIdentityKey(session), session]));
   const sessions = patientSessions.filter((session) => !session.paid);
   const settledSessions = patientSessions.filter((session) => session.paid);
   const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
   const rejectedPairs = rejectedPaymentSet(store);
-  const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
   const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
   const patientSessionIds = new Set(patientSessions.map((session) => session.id));
   const transactions = collectTransactions(store)
@@ -1839,24 +1907,63 @@ function buildPatientReconciliation(store, patientName) {
     .filter(Boolean)
     .sort((left, right) => dateSortValue(left.transactionDate) - dateSortValue(right.transactionDate));
 
-  const usedTransactions = collectTransactions(store)
-    .filter((transaction) => Array.isArray(transaction.matchedTargets) && transaction.matchedTargets.some((targetId) => patientSessionIds.has(targetId)))
-    .map((transaction) => {
-      const targets = settledSessions
-        .filter((session) => (transaction.matchedTargets || []).includes(session.id))
-        .map(matchTargetFromSession);
+  const usedTransactions = patientConfirmedMatches
+    .filter((match) => match.transaction?.id)
+    .map((match) => {
+      const targets = (match.targets || [])
+        .map((target) => {
+          const currentSession =
+            patientSessionsById.get(target.id) ||
+            patientSessionsByKey.get(sessionIdentityKey(target)) ||
+            rawPatientSessionsById.get(target.id) ||
+            rawPatientSessionsByKey.get(sessionIdentityKey(target)) ||
+            null;
+
+          if (currentSession) {
+            return matchTargetFromSession(currentSession);
+          }
+
+          if (normalizeSearchValue(target.patientName) !== patientKey) {
+            return null;
+          }
+
+          return {
+            id: target.id,
+            type: target.type,
+            visitId: target.visitId,
+            importId: target.importId,
+            rowId: target.rowId,
+            linkedVisitId: target.linkedVisitId,
+            patientName: target.patientName,
+            dateLabel: target.dateLabel,
+            time: target.time || "",
+            amount: Number(target.amount || 0),
+            sessionOutcome: target.sessionOutcome || null,
+            sessionOutcomeLabel: target.sessionOutcomeLabel || null,
+            paymentMethod: match.externalPayment?.method || "transfer",
+            paymentStatusLabel: match.externalPayment?.label || "oplacone",
+            paidAt: match.transaction?.transactionDate || match.confirmedAt || null,
+            paymentMatchId: match.id || null
+          };
+        })
+        .filter(Boolean);
+
+      if (!targets.length) {
+        return null;
+      }
 
       return {
-        id: transaction.id,
-        transactionNo: transaction.transactionNo,
-        transactionDate: transaction.transactionDate,
-        counterparty: transaction.counterparty,
-        title: transaction.title,
-        amount: transaction.amount,
-        currency: transaction.currency,
+        id: match.transaction.id,
+        transactionNo: match.transaction.transactionNo,
+        transactionDate: match.transaction.transactionDate,
+        counterparty: match.transaction.counterparty,
+        title: match.transaction.title,
+        amount: match.transaction.amount,
+        currency: match.transaction.currency,
         matchedTargets: targets
       };
     })
+    .filter(Boolean)
     .sort((left, right) => dateSortValue(left.transactionDate) - dateSortValue(right.transactionDate));
 
   const settledAmount = settledSessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
