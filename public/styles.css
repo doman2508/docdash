@@ -441,22 +441,61 @@ p {
 }
 
 .patient-reconciliation-panel {
-  margin: 8px 0 14px;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(38, 28, 18, 0.26);
+}
+
+.patient-reconciliation-card {
+  width: min(1180px, 100%);
+  max-height: min(86vh, 920px);
+  overflow: hidden;
   padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(35, 83, 71, 0.16);
+  border-radius: 20px;
+  background: rgba(249, 245, 239, 0.98);
+  border: 1px solid rgba(35, 83, 71, 0.18);
+  box-shadow: 0 20px 55px rgba(38, 28, 18, 0.18);
+}
+
+.patient-reconciliation-panel .panel-header {
+  margin-bottom: 10px;
 }
 
 .patient-reconciliation-panel .panel-header span {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.84rem;
+}
+
+.ledger-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ledger-filter-bar label {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.ledger-filter-bar select {
+  border-radius: 12px;
+  border: 1px solid rgba(78, 50, 24, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  padding: 8px 10px;
+  color: var(--text);
 }
 
 .patient-reconciliation-grid {
   display: grid;
   grid-template-columns: minmax(220px, 0.82fr) minmax(320px, 1.18fr);
   gap: 12px;
+  max-height: calc(min(86vh, 920px) - 120px);
 }
 
 .ledger-column-header {
@@ -470,6 +509,13 @@ p {
 .ledger-list {
   display: grid;
   gap: 8px;
+  max-height: calc(min(86vh, 920px) - 220px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.compact-ledger-list {
+  gap: 6px;
 }
 
 .ledger-session,
@@ -477,12 +523,14 @@ p {
   border: 1px solid rgba(78, 50, 24, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .ledger-session {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 10px;
   text-align: left;
 }
 
@@ -495,24 +543,25 @@ p {
 .ledger-transaction {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
 }
 
 .ledger-transaction span,
 .ledger-session span {
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.8rem;
+  line-height: 1.25;
 }
 
 .ledger-transaction-actions {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   justify-items: start;
 }
 
 .ledger-exception-actions {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .external-payment-actions {

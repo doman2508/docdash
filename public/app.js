@@ -36,6 +36,9 @@ const state = {
   showImportArchive: false,
   reconciliationLedger: null,
   reconciliationSelectedSessionId: null,
+  reconciliationSessionFilter: "selected",
+  reconciliationTransactionFilter: "recommended",
+  reconciliationFocusTransactionId: null,
   activeView: "dashboard"
 };
 
@@ -120,6 +123,26 @@ function getDateSortValue(label) {
   }
 
   return Number(match[3]) * 10000 + Number(match[2]) * 100 + Number(match[1]);
+}
+
+function parseDateLabel(label) {
+  const normalized = normalizeDateKey(label);
+  const match = String(normalized || "").match(/^(\d{1,2})\.(\d{2})\.(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+}
+
+function dateDistanceBetween(left, right) {
+  const leftDate = parseDateLabel(left);
+  const rightDate = parseDateLabel(right);
+  if (!leftDate || !rightDate) {
+    return 999;
+  }
+
+  return Math.round((rightDate.getTime() - leftDate.getTime()) / 86400000);
 }
 
 function getTimeSortValue(label) {
@@ -837,92 +860,147 @@ function renderPatientReconciliation() {
     return;
   }
 
-  const sessions = ledger.sessions || [];
-  const transactions = ledger.transactions || [];
-  if (!sessions.some((session) => session.id === state.reconciliationSelectedSessionId)) {
-    state.reconciliationSelectedSessionId = sessions[0]?.id || null;
+  const allSessions = ledger.sessions || [];
+  const allTransactions = ledger.transactions || [];
+  if (!allSessions.some((session) => session.id === state.reconciliationSelectedSessionId)) {
+    state.reconciliationSelectedSessionId = allSessions[0]?.id || null;
   }
 
-  const selectedSession = sessions.find((session) => session.id === state.reconciliationSelectedSessionId);
+  const selectedSession = allSessions.find((session) => session.id === state.reconciliationSelectedSessionId);
+  const focusedTransaction = allTransactions.find((transaction) => transaction.id === state.reconciliationFocusTransactionId) || null;
+
+  const filteredSessions = allSessions.filter((session) => {
+    if (state.reconciliationSessionFilter === "selected") {
+      return session.id === state.reconciliationSelectedSessionId;
+    }
+
+    if (state.reconciliationSessionFilter === "nearby" && focusedTransaction) {
+      const sameAmount = Math.abs(Number(session.amount || 0) - Number(focusedTransaction.amount || 0)) < 0.01;
+      const distance = Math.abs(dateDistanceBetween(session.dateLabel, focusedTransaction.transactionDate));
+      return sameAmount && distance <= 21;
+    }
+
+    return true;
+  });
+
+  const filteredTransactions = allTransactions.filter((transaction) => {
+    if (!selectedSession) {
+      return true;
+    }
+
+    const sameAmount = Math.abs(Number(transaction.amount || 0) - Number(selectedSession.amount || 0)) < 0.01;
+    const distance = Math.abs(dateDistanceBetween(selectedSession.dateLabel, transaction.transactionDate));
+
+    if (state.reconciliationTransactionFilter === "recommended") {
+      return transaction.bestSessionId === selectedSession.id;
+    }
+
+    if (state.reconciliationTransactionFilter === "nearby") {
+      return sameAmount && distance <= 21;
+    }
+
+    return true;
+  });
   const sessionCopy = selectedSession
     ? `${selectedSession.dateLabel} ${selectedSession.time || ""} - ${formatCurrency(selectedSession.amount)}`
     : "Wybierz sesje";
 
   panel.hidden = false;
   panel.innerHTML = `
-    <div class="panel-header compact-header">
-      <div>
-        <p class="panel-label">Rozlicz pacjenta</p>
-        <h3>${ledger.patientName}</h3>
-        <span>Wybrana sesja: ${sessionCopy}</span>
+    <div class="patient-reconciliation-card">
+      <div class="panel-header compact-header">
+        <div>
+          <p class="panel-label">Rozlicz pacjenta</p>
+          <h3>${ledger.patientName}</h3>
+          <span>Wybrana sesja: ${sessionCopy}</span>
+        </div>
+        <button class="ghost close-patient-reconciliation" type="button">Zamknij</button>
       </div>
-      <button class="ghost close-patient-reconciliation" type="button">Zamknij</button>
-    </div>
 
-    <div class="patient-reconciliation-grid">
-      <section>
-        <div class="ledger-column-header">
-          <strong>Sesje do rozliczenia</strong>
-          <span>${sessions.length}</span>
-        </div>
-        <div class="ledger-list">
+      <div class="ledger-filter-bar">
+        <label>
+          Sesje
+          <select id="ledger-session-filter">
+            <option value="selected" ${state.reconciliationSessionFilter === "selected" ? "selected" : ""}>Tylko wybrana</option>
+            <option value="nearby" ${state.reconciliationSessionFilter === "nearby" ? "selected" : ""}>Blisko platnosci</option>
+            <option value="all" ${state.reconciliationSessionFilter === "all" ? "selected" : ""}>Wszystkie</option>
+          </select>
+        </label>
+        <label>
+          Platnosci
+          <select id="ledger-transaction-filter">
+            <option value="recommended" ${state.reconciliationTransactionFilter === "recommended" ? "selected" : ""}>Najbardziej pasujace</option>
+            <option value="nearby" ${state.reconciliationTransactionFilter === "nearby" ? "selected" : ""}>Blisko sesji</option>
+            <option value="all" ${state.reconciliationTransactionFilter === "all" ? "selected" : ""}>Wszystkie</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="patient-reconciliation-grid">
+        <section>
+          <div class="ledger-column-header">
+            <strong>Sesje do rozliczenia</strong>
+            <span>${filteredSessions.length} / ${allSessions.length}</span>
+          </div>
+          <div class="ledger-list compact-ledger-list">
+            ${
+              filteredSessions.length
+                ? filteredSessions
+                    .map((session) => `
+                      <button class="ledger-session ${session.id === state.reconciliationSelectedSessionId ? "selected" : ""}" type="button" data-ledger-session-id="${session.id}">
+                        <strong>${session.dateLabel} ${session.time || ""}</strong>
+                        <span>${formatCurrency(session.amount)}</span>
+                      </button>
+                    `)
+                    .join("")
+                : `<div class="empty-state">Brak sesji w tym filtrze.</div>`
+            }
+          </div>
           ${
-            sessions.length
-              ? sessions
-                  .map((session) => `
-                    <button class="ledger-session ${session.id === state.reconciliationSelectedSessionId ? "selected" : ""}" type="button" data-ledger-session-id="${session.id}">
-                      <strong>${session.dateLabel} ${session.time || ""}</strong>
-                      <span>${formatCurrency(session.amount)}</span>
-                    </button>
-                  `)
-                  .join("")
-              : `<div class="empty-state">Brak nierozliczonych sesji dla tego pacjenta.</div>`
+            selectedSession
+              ? `
+                <div class="external-payment-actions ledger-exception-actions">
+                  <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="false">Gotowka</button>
+                  <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="false">Inne konto</button>
+                  <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="ignored" data-remember="false">Pomin</button>
+                  <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="true">Gotowka stale</button>
+                  <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="true">Inne konto stale</button>
+                </div>
+              `
+              : ""
           }
-        </div>
-        ${
-          selectedSession
-            ? `
-              <div class="external-payment-actions ledger-exception-actions">
-                <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="false">Gotowka</button>
-                <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="false">Inne konto</button>
-                <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="ignored" data-remember="false">Pomin</button>
-                <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="true">Gotowka stale</button>
-                <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="true">Inne konto stale</button>
-              </div>
-            `
-            : ""
-        }
-      </section>
+        </section>
 
-      <section>
-        <div class="ledger-column-header">
-          <strong>Wplywy do wyboru</strong>
-          <span>${transactions.length}</span>
-        </div>
-        <div class="ledger-list">
-          ${
-            transactions.length
-              ? transactions
-                  .map((transaction) => `
-                    <article class="ledger-transaction ${transaction.bestSessionId === state.reconciliationSelectedSessionId ? "recommended" : ""}">
-                      <div>
-                        <strong>${transaction.transactionDate} - ${transaction.counterparty}</strong>
-                        <span>${transaction.title || "bez tytulu"}</span>
-                        <div class="reconciliation-signals">
-                          ${(transaction.reasons || []).slice(0, 4).map((reason) => `<span>${reason}</span>`).join("")}
+        <section>
+          <div class="ledger-column-header">
+            <strong>Wplywy do wyboru</strong>
+            <span>${filteredTransactions.length} / ${allTransactions.length}</span>
+          </div>
+          <div class="ledger-list compact-ledger-list">
+            ${
+              filteredTransactions.length
+                ? filteredTransactions
+                    .map((transaction) => `
+                      <article class="ledger-transaction ${transaction.bestSessionId === state.reconciliationSelectedSessionId ? "recommended" : ""}">
+                        <div>
+                          <strong>${transaction.transactionDate} - ${transaction.counterparty}</strong>
+                          <span>${transaction.title || "bez tytulu"}</span>
+                          <div class="reconciliation-signals">
+                            ${(transaction.reasons || []).slice(0, 3).map((reason) => `<span>${reason}</span>`).join("")}
+                          </div>
                         </div>
-                      </div>
-                      <div class="ledger-transaction-actions">
-                        <strong>${formatCurrency(transaction.amount)}</strong>
-                        <button class="primary ledger-link-payment" type="button" data-target-id="${state.reconciliationSelectedSessionId || ""}" data-transaction-id="${transaction.id}" ${state.reconciliationSelectedSessionId ? "" : "disabled"}>Podepnij</button>
-                      </div>
-                    </article>
-                  `)
-                  .join("")
-              : `<div class="empty-state">Brak wolnych wplywow z wyraznym sygnalem tego pacjenta.</div>`
-          }
-        </div>
-      </section>
+                        <div class="ledger-transaction-actions">
+                          <strong>${formatCurrency(transaction.amount)}</strong>
+                          <button class="primary ledger-link-payment" type="button" data-target-id="${state.reconciliationSelectedSessionId || ""}" data-transaction-id="${transaction.id}" ${state.reconciliationSelectedSessionId ? "" : "disabled"}>Podepnij</button>
+                        </div>
+                      </article>
+                    `)
+                    .join("")
+                : `<div class="empty-state">Brak platnosci w tym filtrze.</div>`
+            }
+          </div>
+        </section>
+      </div>
     </div>
   `;
 }
@@ -959,7 +1037,7 @@ function renderReconciliation() {
       const firstTargetId = match.targets?.[0]?.id || "";
       const firstPatientName = match.targets?.[0]?.patientName || "";
       const openPatientButton = firstPatientName
-        ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(firstPatientName)}">Rozlicz pacjenta</button>`
+        ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(firstPatientName)}" data-target-id="${firstTargetId}" data-transaction-id="${match.transaction?.id || ""}">Rozlicz pacjenta</button>`
         : "";
       const transactionCopy = match.externalPayment
         ? `Platnosc poza bankiem: ${match.externalPayment.label}`
@@ -1160,7 +1238,7 @@ async function fetchPatientReconciliation(patientName) {
   return response.json();
 }
 
-async function openPatientReconciliation(patientName) {
+async function openPatientReconciliation(patientName, focusSessionId = null, focusTransactionId = null) {
   setSaveStatus("Laduje rozliczenie pacjenta...", "pending");
   const ledger = await fetchPatientReconciliation(patientName);
 
@@ -1170,7 +1248,12 @@ async function openPatientReconciliation(patientName) {
   }
 
   state.reconciliationLedger = ledger;
-  state.reconciliationSelectedSessionId = ledger.sessions?.[0]?.id || null;
+  state.reconciliationSelectedSessionId = ledger.sessions?.some((session) => session.id === focusSessionId)
+    ? focusSessionId
+    : ledger.sessions?.[0]?.id || null;
+  state.reconciliationSessionFilter = focusSessionId ? "selected" : "all";
+  state.reconciliationTransactionFilter = focusTransactionId ? "recommended" : "all";
+  state.reconciliationFocusTransactionId = focusTransactionId || null;
   renderAll();
   setActiveView("billing");
   setSaveStatus(`Rozliczenie pacjenta: ${ledger.patientName}`, "success");
@@ -1187,6 +1270,9 @@ async function refreshOpenPatientReconciliation() {
   state.reconciliationSelectedSessionId = ledger?.sessions?.some((session) => session.id === previousSessionId)
     ? previousSessionId
     : ledger?.sessions?.[0]?.id || null;
+  if (!ledger) {
+    state.reconciliationFocusTransactionId = null;
+  }
 }
 
 function readJsonFile(file) {
@@ -1729,7 +1815,11 @@ function attachActions() {
 
   document.querySelectorAll(".open-patient-reconciliation").forEach((button) => {
     button.onclick = async () => {
-      await openPatientReconciliation(decodeURIComponent(button.dataset.patientName || ""));
+      await openPatientReconciliation(
+        decodeURIComponent(button.dataset.patientName || ""),
+        button.dataset.targetId || null,
+        button.dataset.transactionId || null
+      );
     };
   });
 
@@ -1737,6 +1827,9 @@ function attachActions() {
     button.onclick = () => {
       state.reconciliationLedger = null;
       state.reconciliationSelectedSessionId = null;
+      state.reconciliationSessionFilter = "selected";
+      state.reconciliationTransactionFilter = "recommended";
+      state.reconciliationFocusTransactionId = null;
       renderAll();
       setActiveView("billing");
     };
@@ -1745,9 +1838,22 @@ function attachActions() {
   document.querySelectorAll(".ledger-session").forEach((button) => {
     button.onclick = () => {
       state.reconciliationSelectedSessionId = button.dataset.ledgerSessionId;
+      state.reconciliationSessionFilter = "selected";
       renderAll();
       setActiveView("billing");
     };
+  });
+
+  document.getElementById("ledger-session-filter")?.addEventListener("change", (event) => {
+    state.reconciliationSessionFilter = event.target.value;
+    renderAll();
+    setActiveView("billing");
+  });
+
+  document.getElementById("ledger-transaction-filter")?.addEventListener("change", (event) => {
+    state.reconciliationTransactionFilter = event.target.value;
+    renderAll();
+    setActiveView("billing");
   });
 
   document.querySelectorAll(".ledger-link-payment").forEach((button) => {
