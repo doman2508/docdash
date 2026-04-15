@@ -801,9 +801,69 @@ function sessionIdentityKey(session) {
   return `${normalizeSearchValue(session.patientName)}|${normalizeDateLabel(session.dateLabel)}|${session.time || ""}|${Number(session.amount || 0)}`;
 }
 
+function sessionOutcomePriority(outcome, dateLabel) {
+  switch (normalizeSessionOutcome(outcome, dateLabel)) {
+    case "completed":
+      return 4;
+    case "no_show_paid":
+      return 3;
+    case "scheduled":
+      return 2;
+    case "future":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function isPendingPaymentStatusLabel(label) {
+  const value = normalizeSearchValue(label);
+  if (!value) {
+    return true;
+  }
+
+  return (
+    value.includes("platnosc oczekuje") ||
+    value.includes("nie zaplacono") ||
+    value.includes("brak platnosci")
+  );
+}
+
+function mergeSessionRecords(existing, incoming) {
+  const useIncomingOutcome =
+    sessionOutcomePriority(incoming.sessionOutcome, incoming.dateLabel) >
+    sessionOutcomePriority(existing.sessionOutcome, existing.dateLabel);
+  const incomingPaid = Boolean(incoming.paid);
+  const existingPaid = Boolean(existing.paid);
+  const preferIncomingPayment = incomingPaid && (!existingPaid || Boolean(incoming.bankTransactionId || incoming.paymentMatchId));
+
+  let paymentStatusLabel = existing.paymentStatusLabel || null;
+  if (
+    !paymentStatusLabel ||
+    isPendingPaymentStatusLabel(paymentStatusLabel) ||
+    preferIncomingPayment
+  ) {
+    paymentStatusLabel = incoming.paymentStatusLabel || existing.paymentStatusLabel || null;
+  }
+
+  return {
+    ...existing,
+    linkedVisitId: existing.linkedVisitId || incoming.linkedVisitId || incoming.visitId || null,
+    sessionOutcome: useIncomingOutcome ? incoming.sessionOutcome : existing.sessionOutcome,
+    sessionOutcomeLabel: useIncomingOutcome ? incoming.sessionOutcomeLabel : existing.sessionOutcomeLabel,
+    paid: existingPaid || incomingPaid,
+    bankTransactionId: existing.bankTransactionId || incoming.bankTransactionId || null,
+    paymentMethod: existing.paymentMethod || incoming.paymentMethod || null,
+    paymentStatusLabel,
+    paidAt: existing.paidAt || incoming.paidAt || null,
+    paymentMatchId: existing.paymentMatchId || incoming.paymentMatchId || null
+  };
+}
+
 function collectSessions(store) {
   const sessions = [];
   const seenSessionKeys = new Set();
+  const sessionIndexes = new Map();
   const linkedVisitIds = new Set();
   const visitsById = new Map((store.visits || []).map((visit) => [visit.id, visit]));
 
@@ -821,6 +881,29 @@ function collectSessions(store) {
 
       const sessionKey = sessionIdentityKey(row);
       if (seenSessionKeys.has(sessionKey)) {
+        const existingIndex = sessionIndexes.get(sessionKey);
+        if (existingIndex !== undefined) {
+          sessions[existingIndex] = mergeSessionRecords(sessions[existingIndex], {
+            id: `import:${batch.id}:${row.id}`,
+            type: "importRow",
+            importId: batch.id,
+            rowId: row.id,
+            linkedVisitId: row.linkedVisitId,
+            patientName: row.patientName,
+            dateLabel: row.dateLabel,
+            time: row.time || "",
+            amount: Number(row.amount || 0),
+            sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
+            sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
+            paid: isPaidImportRow(row),
+            bankTransactionId: row.bankTransactionId || null,
+            paymentMethod: row.externalPaymentMethod || (row.bankTransactionId ? "transfer" : null),
+            paymentStatusLabel: row.paymentStatus || (isPaidImportRow(row) ? "oplacone" : "platnosc oczekuje"),
+            paidAt: row.bankPaidAt || row.externalPaidAt || null,
+            paymentMatchId: row.paymentMatchId || null
+          });
+        }
+
         return;
       }
 
@@ -848,6 +931,7 @@ function collectSessions(store) {
         paidAt: row.bankPaidAt || row.externalPaidAt || null,
         paymentMatchId: row.paymentMatchId || null
       });
+      sessionIndexes.set(sessionKey, sessions.length - 1);
     });
   });
 
@@ -864,7 +948,7 @@ function collectSessions(store) {
       return;
     }
 
-    sessions.push({
+    const visitSession = {
       id: `visit:${visit.id}`,
       type: "visit",
       visitId: visit.id,
@@ -880,7 +964,21 @@ function collectSessions(store) {
       paymentStatusLabel: visit.payment?.statusLabel || (isPaidVisit(visit) ? "oplacone" : "platnosc oczekuje"),
       paidAt: visit.payment?.paidAt || null,
       paymentMatchId: visit.payment?.paymentMatchId || null
-    });
+    };
+    const sessionKey = sessionIdentityKey(visitSession);
+
+    if (seenSessionKeys.has(sessionKey)) {
+      const existingIndex = sessionIndexes.get(sessionKey);
+      if (existingIndex !== undefined) {
+        sessions[existingIndex] = mergeSessionRecords(sessions[existingIndex], visitSession);
+      }
+
+      return;
+    }
+
+    seenSessionKeys.add(sessionKey);
+    sessions.push(visitSession);
+    sessionIndexes.set(sessionKey, sessions.length - 1);
   });
 
   return sessions
@@ -1505,6 +1603,10 @@ function generatePaymentMatches(store) {
   return store.paymentMatches;
 }
 
+function rebuildPaymentMatches(store) {
+  return generatePaymentMatches(store);
+}
+
 function applyPaymentToTarget(store, target, transaction, matchId) {
   const paidAt = transaction.transactionDate || new Date().toISOString().slice(0, 10);
 
@@ -1835,7 +1937,7 @@ function buildPatientReconciliation(store, patientName) {
       confirmedMatch?.externalPayment?.method ||
       (confirmedMatch?.transaction ? "transfer" : null);
     let paymentStatusLabel = session.paymentStatusLabel;
-    if (paid && (!paymentStatusLabel || paymentStatusLabel === "platnosc oczekuje")) {
+    if (paid && (!paymentStatusLabel || isPendingPaymentStatusLabel(paymentStatusLabel))) {
       paymentStatusLabel = confirmedMatch?.externalPayment?.label || "oplacone";
     }
 
@@ -2272,10 +2374,8 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === "/api/reconciliation" && req.method === "GET") {
     const data = readData();
-    if (!data.paymentMatches) {
-      generatePaymentMatches(data);
-      writeData(data);
-    }
+    rebuildPaymentMatches(data);
+    writeData(data);
 
     sendJson(res, 200, {
       paymentMatches: data.paymentMatches,
@@ -2287,10 +2387,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === "/api/reconciliation/patient" && req.method === "GET") {
     const patientName = requestUrl.searchParams.get("name") || "";
     const data = readData();
-    if (!data.paymentMatches) {
-      generatePaymentMatches(data);
-      writeData(data);
-    }
+    rebuildPaymentMatches(data);
+    writeData(data);
 
     const ledger = buildPatientReconciliation(data, patientName);
     if (!ledger) {
