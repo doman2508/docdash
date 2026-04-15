@@ -256,6 +256,44 @@ function compareRowsByDateTime(left, right) {
   return left.patientName.localeCompare(right.patientName);
 }
 
+function compareSessionDateTimeDesc(left, right) {
+  const leftDate = getDateSortValue(left?.dateLabel) || 0;
+  const rightDate = getDateSortValue(right?.dateLabel) || 0;
+
+  if (leftDate !== rightDate) {
+    return rightDate - leftDate;
+  }
+
+  const leftTime = getTimeSortValue(left?.time);
+  const rightTime = getTimeSortValue(right?.time);
+
+  if (leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+
+  return String(left?.patientName || "").localeCompare(String(right?.patientName || ""));
+}
+
+function compareTransactionHistoryDesc(left, right) {
+  const leftDate = getDateSortValue(left?.transactionDate) || 0;
+  const rightDate = getDateSortValue(right?.transactionDate) || 0;
+
+  if (leftDate !== rightDate) {
+    return rightDate - leftDate;
+  }
+
+  const leftTarget = left?.matchedTargets?.[0] || null;
+  const rightTarget = right?.matchedTargets?.[0] || null;
+  const leftTime = getTimeSortValue(leftTarget?.time);
+  const rightTime = getTimeSortValue(rightTarget?.time);
+
+  if (leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+
+  return String(left?.counterparty || "").localeCompare(String(right?.counterparty || ""));
+}
+
 function getSelectedVisit() {
   if (!state.data) {
     return null;
@@ -1067,6 +1105,8 @@ function renderPatientReconciliation() {
   const selectedSession = allSessions.find((session) => session.id === state.reconciliationSelectedSessionId) || selectedSessions[0] || null;
   const selectedTotal = sumAmounts(selectedSessions);
   const focusedTransaction = allTransactions.find((transaction) => transaction.id === state.reconciliationFocusTransactionId) || null;
+  const settledHistory = [...settledSessions].sort(compareSessionDateTimeDesc);
+  const usedTransactionHistory = [...usedTransactions].sort(compareTransactionHistoryDesc);
 
   const filteredSessions = allSessions.filter((session) => {
     if (state.reconciliationSessionFilter === "selected") {
@@ -1267,12 +1307,12 @@ function renderPatientReconciliation() {
         <section>
           <div class="ledger-column-header">
             <strong>Juz rozliczone sesje</strong>
-            <span>${settledSessions.length}</span>
+            <span>${settledHistory.length}</span>
           </div>
           <div class="ledger-history-list">
             ${
-              settledSessions.length
-                ? settledSessions
+              settledHistory.length
+                ? settledHistory
                     .map((session) => `
                       <article class="ledger-history-item">
                         <div>
@@ -1294,12 +1334,12 @@ function renderPatientReconciliation() {
         <section>
           <div class="ledger-column-header">
             <strong>Juz wykorzystane wplywy</strong>
-            <span>${usedTransactions.length}</span>
+            <span>${usedTransactionHistory.length}</span>
           </div>
           <div class="ledger-history-list">
             ${
-              usedTransactions.length
-                ? usedTransactions
+              usedTransactionHistory.length
+                ? usedTransactionHistory
                     .map((transaction) => `
                       <article class="ledger-history-item">
                         <div>
