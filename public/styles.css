@@ -456,15 +456,16 @@ p {
   inset: 0;
   z-index: 20;
   display: grid;
-  place-items: center;
-  padding: 20px;
+  place-items: start center;
+  overflow: auto;
+  padding: 16px;
   background: rgba(38, 28, 18, 0.26);
 }
 
 .patient-reconciliation-card {
   width: min(1180px, 100%);
-  max-height: min(86vh, 920px);
-  overflow: hidden;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
   padding: 12px;
   border-radius: 18px;
   background: rgba(249, 245, 239, 0.98);
@@ -566,6 +567,21 @@ p {
   color: var(--muted);
 }
 
+.ledger-selection-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.ledger-selection-meta strong {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
 .ledger-list {
   display: grid;
   gap: 6px;
@@ -626,6 +642,12 @@ p {
   line-height: 1.2;
 }
 
+.ledger-transaction-hint {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
 .ledger-transaction-actions {
   display: grid;
   gap: 3px;
@@ -634,6 +656,13 @@ p {
 
 .ledger-exception-actions {
   margin-top: 6px;
+}
+
+.ledger-selection-note {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.25;
 }
 
 .external-payment-actions {
