@@ -37,6 +37,7 @@ const state = {
   reconciliationLedger: null,
   reconciliationSelectedSessionId: null,
   reconciliationSelectedSessionIds: [],
+  reconciliationListFilter: "open",
   reconciliationSessionFilter: "selected",
   reconciliationTransactionFilter: "recommended",
   reconciliationFocusTransactionId: null,
@@ -937,6 +938,64 @@ function renderBilling() {
   renderReconciliation();
 }
 
+function reconciliationPrimaryTarget(match) {
+  const targets = [...(match.targets || [])];
+  return targets.sort((left, right) => {
+    const leftDate = getDateSortValue(left.dateLabel) || 0;
+    const rightDate = getDateSortValue(right.dateLabel) || 0;
+    if (leftDate !== rightDate) {
+      return leftDate - rightDate;
+    }
+
+    const leftTime = getTimeSortValue(left.time);
+    const rightTime = getTimeSortValue(right.time);
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+
+    return String(left.patientName || "").localeCompare(String(right.patientName || ""));
+  })[0] || null;
+}
+
+function matchPassesReconciliationFilter(match, filterKey) {
+  if (filterKey === "all") {
+    return true;
+  }
+
+  if (filterKey === "confirmed") {
+    return match.status === "confirmed" || match.status === "ignored";
+  }
+
+  if (filterKey === "missing") {
+    return match.status === "missing";
+  }
+
+  if (filterKey === "review") {
+    return match.status === "suggested" && match.confidence !== "pewne";
+  }
+
+  return match.status !== "confirmed" && match.status !== "ignored";
+}
+
+function compareReconciliationMatches(left, right) {
+  const leftTarget = reconciliationPrimaryTarget(left);
+  const rightTarget = reconciliationPrimaryTarget(right);
+  const leftDate = getDateSortValue(leftTarget?.dateLabel) || 0;
+  const rightDate = getDateSortValue(rightTarget?.dateLabel) || 0;
+
+  if (leftDate !== rightDate) {
+    return leftDate - rightDate;
+  }
+
+  const leftTime = getTimeSortValue(leftTarget?.time);
+  const rightTime = getTimeSortValue(rightTarget?.time);
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  return String(leftTarget?.patientName || "").localeCompare(String(rightTarget?.patientName || ""));
+}
+
 function syncReconciliationSelection(allSessions) {
   const availableIds = new Set((allSessions || []).map((session) => session.id));
   let selectedIds = normalizeIdList(state.reconciliationSelectedSessionIds).filter((id) => availableIds.has(id));
@@ -1267,7 +1326,9 @@ function renderReconciliation() {
   const reconciliation = state.data.paymentMatches || { summary: {}, matches: [] };
   const summary = reconciliation.summary || {};
   const matches = reconciliation.matches || [];
-  const visibleMatches = matches.slice(0, 500);
+  const sortedMatches = [...matches].sort(compareReconciliationMatches);
+  const filteredMatches = sortedMatches.filter((match) => matchPassesReconciliationFilter(match, state.reconciliationListFilter));
+  const visibleMatches = filteredMatches.slice(0, 500);
 
   document.getElementById("reconciliation-summary").innerHTML = `
     <article><span>Sesje</span><strong>${summary.sessions || 0}</strong></article>
@@ -1287,7 +1348,7 @@ function renderReconciliation() {
     return;
   }
 
-  document.getElementById("reconciliation-list").innerHTML = visibleMatches
+  const itemsHtml = visibleMatches
     .map((match) => {
       const targetCopy = (match.targets || [])
         .map((target) => `${target.dateLabel} ${target.time || ""} - ${target.patientName} - ${formatCurrency(target.amount)}`)
@@ -1369,6 +1430,27 @@ function renderReconciliation() {
       `;
     })
     .join("");
+
+  document.getElementById("reconciliation-list").innerHTML = `
+    <div class="reconciliation-toolbar">
+      <label>
+        Pokaz
+        <select id="reconciliation-status-filter">
+          <option value="open" ${state.reconciliationListFilter === "open" ? "selected" : ""}>Otwarte</option>
+          <option value="review" ${state.reconciliationListFilter === "review" ? "selected" : ""}>Do sprawdzenia</option>
+          <option value="missing" ${state.reconciliationListFilter === "missing" ? "selected" : ""}>Brak platnosci</option>
+          <option value="confirmed" ${state.reconciliationListFilter === "confirmed" ? "selected" : ""}>Potwierdzone</option>
+          <option value="all" ${state.reconciliationListFilter === "all" ? "selected" : ""}>Wszystkie</option>
+        </select>
+      </label>
+      <span>${filteredMatches.length} pozycji, sort po dacie wizyty</span>
+    </div>
+    ${
+      visibleMatches.length
+        ? itemsHtml
+        : `<div class="empty-state">Brak pozycji w tym filtrze.</div>`
+    }
+  `;
 }
 
 function renderStats() {
@@ -2189,6 +2271,12 @@ function attachActions() {
 
   document.getElementById("ledger-transaction-filter")?.addEventListener("change", (event) => {
     state.reconciliationTransactionFilter = event.target.value;
+    renderAll();
+    setActiveView("billing");
+  });
+
+  document.getElementById("reconciliation-status-filter")?.addEventListener("change", (event) => {
+    state.reconciliationListFilter = event.target.value;
     renderAll();
     setActiveView("billing");
   });
