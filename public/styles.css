@@ -29,6 +29,10 @@ body {
   color: var(--text);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body.login-body {
   display: grid;
   min-height: 100vh;
