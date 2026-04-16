@@ -339,7 +339,76 @@ p {
 }
 
 .billing-grid {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(320px, 1.15fr) minmax(240px, 0.85fr);
+  align-items: start;
+}
+
+.visit-layout {
+  align-items: start;
+}
+
+.visit-side-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-panel {
+  padding: 18px;
+}
+
+.compact-header {
+  margin-bottom: 12px;
+}
+
+.visit-layout .form-section,
+.validation-view .form-section {
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.visit-layout textarea,
+.visit-layout input,
+.validation-view textarea,
+.validation-view input {
+  border-radius: 14px;
+  padding: 11px 13px;
+}
+
+.visit-layout .choice-row,
+.visit-layout .inline-actions,
+.validation-view .inline-actions {
+  gap: 8px;
+}
+
+.visit-layout .primary,
+.visit-layout .secondary,
+.visit-layout .ghost,
+.visit-layout .choice,
+.validation-view .primary,
+.validation-view .secondary,
+.validation-view .ghost,
+.validation-view .choice {
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+}
+
+.visit-billing-panel .badge {
+  padding: 5px 8px;
+  font-size: 0.72rem;
+}
+
+.visit-billing-context {
+  margin-top: 4px;
+  max-width: 30ch;
+}
+
+.visit-billing-actions {
+  align-items: center;
+}
+
+.validation-view .panel {
+  padding: 18px;
 }
 
 .reconciliation-panel {
@@ -941,6 +1010,10 @@ p {
   margin-bottom: 18px;
 }
 
+.validation-view .panel-header {
+  margin-bottom: 12px;
+}
+
 .visit-list,
 .payment-list,
 .checklist,
@@ -981,6 +1054,51 @@ p {
   display: flex;
   justify-content: space-between;
   gap: 16px;
+}
+
+.validation-view .payment-list {
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.validation-view .payment-item {
+  padding: 10px 12px;
+  border-radius: 14px;
+  gap: 12px;
+}
+
+.validation-view .payment-item h4 {
+  margin-bottom: 3px;
+  font-size: 0.96rem;
+}
+
+.validation-view .payment-item span {
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.validation-view .stats-table.compact {
+  margin-top: 0;
+  gap: 8px;
+}
+
+.validation-view .stats-table div {
+  padding: 10px 0;
+}
+
+.validation-view .reconciliation-panel {
+  margin-top: 12px;
+}
+
+.validation-view .reconciliation-summary {
+  margin-bottom: 12px;
+}
+
+.validation-view .reconciliation-summary article {
+  padding: 8px 10px;
+  border-radius: 12px;
 }
 
 .patient-item {

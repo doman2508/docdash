@@ -22,7 +22,7 @@
           <button class="nav-link" data-view="imports">Importy</button>
           <button class="nav-link" data-view="patients">Pacjenci</button>
           <button class="nav-link" data-view="visit">Sesja</button>
-          <button class="nav-link" data-view="billing">Rozliczenia</button>
+          <button class="nav-link" data-view="billing">Walidacja</button>
           <button class="nav-link" data-view="stats">Statystyki</button>
         </nav>
 
@@ -169,8 +169,8 @@
         </section>
 
         <section class="view" id="visit-view">
-          <div class="detail-layout">
-            <section class="panel">
+          <div class="detail-layout visit-layout">
+            <section class="panel visit-notes-panel compact-panel">
               <div class="panel-header">
                 <div>
                   <p class="panel-label">Sesja</p>
@@ -181,12 +181,12 @@
 
               <div class="form-section">
                 <label for="visit-notes">Notatki z sesji</label>
-                <textarea id="visit-notes" rows="6"></textarea>
+                <textarea id="visit-notes" rows="5"></textarea>
               </div>
 
               <div class="form-section">
                 <label for="visit-summary">Podsumowanie wizyty</label>
-                <textarea id="visit-summary" rows="5"></textarea>
+                <textarea id="visit-summary" rows="4"></textarea>
                 <div class="inline-actions">
                   <button class="secondary" id="ai-summary" type="button">Podsumuj AI</button>
                   <button class="ghost" id="visit-template" type="button">Wstaw szablon</button>
@@ -194,50 +194,101 @@
               </div>
             </section>
 
-            <section class="panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-label">Kontynuacja</p>
-                  <h3>Nastepna wizyta</h3>
+            <div class="visit-side-stack">
+              <section class="panel compact-panel">
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="panel-label">Kontynuacja</p>
+                    <h3>Nastepna wizyta</h3>
+                  </div>
                 </div>
-              </div>
 
-              <div class="form-section">
-                <label>Wynik sesji</label>
-                <div class="choice-row">
-                  <button class="choice" data-choice-group="session-outcome" data-choice-value="scheduled" type="button">Zaplanowana</button>
-                  <button class="choice" data-choice-group="session-outcome" data-choice-value="completed" type="button">Odbyta</button>
-                  <button class="choice" data-choice-group="session-outcome" data-choice-value="cancelled" type="button">Nie odbyla sie</button>
-                  <button class="choice" data-choice-group="session-outcome" data-choice-value="rescheduled" type="button">Przeniesiona</button>
-                  <button class="choice" data-choice-group="session-outcome" data-choice-value="no_show_paid" type="button">No-show platny</button>
+                <div class="form-section">
+                  <label>Wynik sesji</label>
+                  <div class="choice-row">
+                    <button class="choice" data-choice-group="session-outcome" data-choice-value="scheduled" type="button">Zaplanowana</button>
+                    <button class="choice" data-choice-group="session-outcome" data-choice-value="completed" type="button">Odbyta</button>
+                    <button class="choice" data-choice-group="session-outcome" data-choice-value="cancelled" type="button">Nie odbyla sie</button>
+                    <button class="choice" data-choice-group="session-outcome" data-choice-value="rescheduled" type="button">Przeniesiona</button>
+                    <button class="choice" data-choice-group="session-outcome" data-choice-value="no_show_paid" type="button">No-show platny</button>
+                  </div>
+                  <p class="field-hint" id="visit-session-outcome-hint"></p>
                 </div>
-                <p class="field-hint" id="visit-session-outcome-hint"></p>
-              </div>
 
-              <div class="form-section">
-                <label>Status</label>
-                <div class="choice-row">
-                  <button class="choice" data-choice-group="next-status" data-choice-value="scheduled" type="button">Potwierdzona</button>
-                  <button class="choice" data-choice-group="next-status" data-choice-value="to_schedule" type="button">Do ustalenia</button>
-                  <button class="choice" data-choice-group="next-status" data-choice-value="none" type="button">Brak kontynuacji</button>
+                <div class="form-section">
+                  <label>Status</label>
+                  <div class="choice-row">
+                    <button class="choice" data-choice-group="next-status" data-choice-value="scheduled" type="button">Potwierdzona</button>
+                    <button class="choice" data-choice-group="next-status" data-choice-value="to_schedule" type="button">Do ustalenia</button>
+                    <button class="choice" data-choice-group="next-status" data-choice-value="none" type="button">Brak kontynuacji</button>
+                  </div>
                 </div>
-              </div>
 
-              <div class="form-section">
-                <label for="visit-next-planned">Ustalony termin roboczy</label>
-                <input id="visit-next-planned" type="text" />
-              </div>
+                <div class="form-section">
+                  <label for="visit-next-planned">Ustalony termin roboczy</label>
+                  <input id="visit-next-planned" type="text" />
+                </div>
 
-              <div class="form-section">
-                <label for="visit-next-note">Co trzeba zrobic dalej</label>
-                <textarea id="visit-next-note" rows="4"></textarea>
-              </div>
+                <div class="form-section">
+                  <label for="visit-next-note">Co trzeba zrobic dalej</label>
+                  <textarea id="visit-next-note" rows="3"></textarea>
+                </div>
 
-              <div class="inline-actions">
-                <button class="secondary" id="save-visit" type="button">Zapisz jako robocze</button>
-                <button class="primary" id="close-visit" type="button">Zamknij wizyte</button>
-              </div>
-            </section>
+                <div class="inline-actions">
+                  <button class="secondary" id="save-visit" type="button">Zapisz jako robocze</button>
+                  <button class="primary" id="close-visit" type="button">Zamknij wizyte</button>
+                </div>
+              </section>
+
+              <section class="panel compact-panel visit-billing-panel">
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="panel-label">Platnosc</p>
+                    <h3>Rozliczenie po sesji</h3>
+                    <p class="field-hint visit-billing-context" id="visit-billing-context"></p>
+                  </div>
+                  <span class="badge neutral" id="visit-payment-badge">platnosc oczekuje</span>
+                </div>
+
+                <div class="form-section">
+                  <label for="billing-amount">Kwota</label>
+                  <input id="billing-amount" type="number" min="0" step="1" />
+                </div>
+
+                <div class="form-section">
+                  <label>Status</label>
+                  <div class="choice-row">
+                    <button class="choice" data-choice-group="payment-status" data-choice-value="paid" type="button">Zaplacone</button>
+                    <button class="choice" data-choice-group="payment-status" data-choice-value="pending" type="button">Oczekuje</button>
+                    <button class="choice" data-choice-group="payment-status" data-choice-value="partial" type="button">Czesciowo</button>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <label>Forma platnosci</label>
+                  <div class="choice-row">
+                    <button class="choice" data-choice-group="payment-method" data-choice-value="transfer" type="button">Przelew</button>
+                    <button class="choice" data-choice-group="payment-method" data-choice-value="cash" type="button">Gotowka</button>
+                    <button class="choice" data-choice-group="payment-method" data-choice-value="blik" type="button">BLIK</button>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <label>Dokument sprzedazy</label>
+                  <div class="choice-row">
+                    <button class="choice" data-choice-group="payment-document" data-choice-value="receipt" type="button">Paragon</button>
+                    <button class="choice" data-choice-group="payment-document" data-choice-value="invoice" type="button">Faktura</button>
+                    <button class="choice" data-choice-group="payment-document" data-choice-value="none" type="button">Bez dokumentu</button>
+                  </div>
+                </div>
+
+                <div class="inline-actions visit-billing-actions">
+                  <button class="secondary" id="mark-paid" type="button">Oznacz jako zaplacone</button>
+                  <button class="primary" id="issue-document" type="button">Wystaw dokument</button>
+                  <button class="ghost" id="open-validation" type="button">Walidacja z bankiem</button>
+                </div>
+              </section>
+            </div>
           </div>
         </section>
 
@@ -308,63 +359,26 @@
           </div>
         </section>
 
-        <section class="view" id="billing-view">
+        <section class="view validation-view" id="billing-view">
           <div class="grid billing-grid">
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="panel-label">Rozliczenie po sesji</p>
-                  <h3>Status platnosci</h3>
+                  <p class="panel-label">Szybki podglad</p>
+                  <h3>Otwarte pozycje do domkniecia</h3>
                 </div>
               </div>
 
-              <div class="form-section">
-                <label for="billing-amount">Kwota</label>
-                <input id="billing-amount" type="number" min="0" step="1" />
-              </div>
-
-              <div class="form-section">
-                <label>Status</label>
-                <div class="choice-row">
-                  <button class="choice" data-choice-group="payment-status" data-choice-value="paid" type="button">Zaplacone</button>
-                  <button class="choice" data-choice-group="payment-status" data-choice-value="pending" type="button">Oczekuje</button>
-                  <button class="choice" data-choice-group="payment-status" data-choice-value="partial" type="button">Czesciowo</button>
-                </div>
-              </div>
-
-              <div class="form-section">
-                <label>Forma platnosci</label>
-                <div class="choice-row">
-                  <button class="choice" data-choice-group="payment-method" data-choice-value="transfer" type="button">Przelew</button>
-                  <button class="choice" data-choice-group="payment-method" data-choice-value="cash" type="button">Gotowka</button>
-                  <button class="choice" data-choice-group="payment-method" data-choice-value="blik" type="button">BLIK</button>
-                </div>
-              </div>
-
-              <div class="form-section">
-                <label>Dokument sprzedazy</label>
-                <div class="choice-row">
-                  <button class="choice" data-choice-group="payment-document" data-choice-value="receipt" type="button">Paragon</button>
-                  <button class="choice" data-choice-group="payment-document" data-choice-value="invoice" type="button">Faktura</button>
-                  <button class="choice" data-choice-group="payment-document" data-choice-value="none" type="button">Bez dokumentu</button>
-                </div>
-              </div>
-
-              <div class="inline-actions">
-                <button class="secondary" id="mark-paid" type="button">Oznacz jako zaplacone</button>
-                <button class="primary" id="issue-document" type="button">Wystaw dokument</button>
-              </div>
+              <div class="payment-list compact-payment-list" id="payment-list"></div>
             </section>
 
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="panel-label">Do dopilnowania</p>
-                  <h3>Zalegle platnosci</h3>
+                  <p class="panel-label">Bilans</p>
+                  <h3>Stan rozliczen</h3>
                 </div>
               </div>
-
-              <div class="payment-list" id="payment-list"></div>
 
               <div class="stats-table compact" id="billing-summary"></div>
             </section>

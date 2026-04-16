@@ -16,8 +16,8 @@ const views = {
     subtitle: "Notatki, podsumowanie, kontynuacja i rozliczenie po spotkaniu."
   },
   billing: {
-    title: "Rozliczenia",
-    subtitle: "Status platnosci, dokument sprzedazy i lista rzeczy do dopilnowania."
+    title: "Walidacja platnosci",
+    subtitle: "Import banku, dopasowanie do sesji i wyjatki wymagajace recznej decyzji."
   },
   stats: {
     title: "Statystyki miesieczne",
@@ -994,16 +994,31 @@ function renderImports() {
 function renderBilling() {
   const visit = getSelectedVisit();
   const monthly = getMonthlyStats();
+  const paymentBadge = document.getElementById("visit-payment-badge");
+  const paymentContext = document.getElementById("visit-billing-context");
+  const openPayments = state.data.visits
+    .filter((entry) => isVisitChargeable(entry))
+    .filter((entry) => entry.payment.status !== "paid")
+    .sort(compareSessionDateTimeDesc);
 
   document.getElementById("billing-amount").value = String(visit.payment.amount);
   setChoiceState("payment-status", visit.payment.status);
   setChoiceState("payment-method", visit.payment.method);
   setChoiceState("payment-document", visit.payment.documentType);
 
-  document.getElementById("payment-list").innerHTML = state.data.visits
-    .filter((entry) => isVisitChargeable(entry))
-    .filter((entry) => entry.payment.status !== "paid")
-    .map((entry) => {
+  if (paymentBadge) {
+    paymentBadge.textContent = visit.payment.statusLabel;
+    paymentBadge.className = `badge ${
+      visit.payment.status === "paid" ? "success" : visit.payment.status === "partial" ? "neutral" : "warning"
+    }`;
+  }
+
+  if (paymentContext) {
+    paymentContext.textContent = `${visit.patientName} | ${visit.dateLabel} ${visit.time} | ${visit.payment.statusLabel}`;
+  }
+
+  document.getElementById("payment-list").innerHTML = openPayments.length
+    ? openPayments.map((entry) => {
       return `
         <article class="payment-item">
           <div>
@@ -1014,7 +1029,8 @@ function renderBilling() {
         </article>
       `;
     })
-    .join("");
+    .join("")
+    : `<div class="empty-state">Brak otwartych platnosci do dopilnowania.</div>`;
 
   document.getElementById("billing-summary").innerHTML = `
     <div><span>Przychod miesieczny</span><strong>${formatCurrency(monthly.due)}</strong></div>
@@ -2260,6 +2276,11 @@ function attachActions() {
       },
       "Dokument sprzedazy zaktualizowany."
     );
+  };
+
+  document.getElementById("open-validation").onclick = () => {
+    setActiveView("billing");
+    setSaveStatus("Przeszedles do walidacji platnosci dla calej praktyki.", "idle");
   };
 
   document.getElementById("ai-summary").onclick = () => {
