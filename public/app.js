@@ -41,6 +41,7 @@ const state = {
   reconciliationSessionFilter: "selected",
   reconciliationTransactionFilter: "recommended",
   reconciliationFocusTransactionId: null,
+  notesWorkspaceOpen: false,
   activeView: "dashboard"
 };
 
@@ -443,6 +444,10 @@ function startReconciliationImportStatusTimers() {
 }
 
 function setActiveView(viewKey) {
+  if (viewKey !== "visit" && state.notesWorkspaceOpen) {
+    setNotesWorkspaceVisibility(false);
+  }
+
   state.activeView = viewKey;
   const meta = views[viewKey];
   titleEl.textContent = meta.title;
@@ -732,6 +737,12 @@ function renderVisitForm() {
   updateSessionOutcomeHint(outcomeMeta.key, visit.dateLabel);
   setChoiceState("session-outcome", outcomeMeta.key);
   setChoiceState("next-status", visit.nextVisit.status);
+
+  if (!state.notesWorkspaceOpen) {
+    syncNotesWorkspacePreview(visit.notes);
+  } else {
+    updateNotesWorkspaceMeta(visit);
+  }
 }
 
 function renderPatients() {
@@ -1039,6 +1050,61 @@ function renderBilling() {
   `;
 
   renderReconciliation();
+}
+
+function syncNotesWorkspacePreview(value) {
+  const preview = document.getElementById("visit-notes");
+  const workspaceInput = document.getElementById("notes-workspace-input");
+
+  if (preview) {
+    preview.value = value || "";
+  }
+
+  if (workspaceInput && state.notesWorkspaceOpen) {
+    workspaceInput.value = value || "";
+  }
+}
+
+function updateNotesWorkspaceMeta(visit = getSelectedVisit()) {
+  const title = document.getElementById("notes-workspace-title");
+  const meta = document.getElementById("notes-workspace-meta");
+
+  if (!title || !meta || !visit) {
+    return;
+  }
+
+  title.textContent = `Notatki - ${visit.patientName}`;
+  meta.textContent = `${visit.dateLabel} | ${visit.time} | ${visit.serviceName || "sesja"}`;
+}
+
+function setNotesWorkspaceVisibility(isVisible) {
+  const overlay = document.getElementById("notes-workspace-overlay");
+  const workspaceInput = document.getElementById("notes-workspace-input");
+  const preview = document.getElementById("visit-notes");
+
+  if (!overlay || !workspaceInput || !preview) {
+    return;
+  }
+
+  if (isVisible) {
+    const visit = getSelectedVisit();
+    updateNotesWorkspaceMeta(visit);
+    workspaceInput.value = preview.value || "";
+    overlay.hidden = false;
+    document.body.classList.add("workspace-open");
+    state.notesWorkspaceOpen = true;
+    window.requestAnimationFrame(() => {
+      workspaceInput.focus();
+      const end = workspaceInput.value.length;
+      workspaceInput.setSelectionRange(end, end);
+    });
+    return;
+  }
+
+  preview.value = workspaceInput.value || "";
+  overlay.hidden = true;
+  document.body.classList.remove("workspace-open");
+  state.notesWorkspaceOpen = false;
 }
 
 function reconciliationPrimaryTarget(match) {
@@ -2283,6 +2349,50 @@ function attachActions() {
     setSaveStatus("Przeszedles do walidacji platnosci dla calej praktyki.", "idle");
   };
 
+  const notesPreview = document.getElementById("visit-notes");
+  const openNotesWorkspaceButton = document.getElementById("open-notes-workspace");
+  const closeNotesWorkspaceButton = document.getElementById("close-notes-workspace");
+  const notesWorkspaceInput = document.getElementById("notes-workspace-input");
+  const notesWorkspaceOverlay = document.getElementById("notes-workspace-overlay");
+
+  if (notesPreview) {
+    notesPreview.onpointerdown = (event) => {
+      event.preventDefault();
+      setNotesWorkspaceVisibility(true);
+    };
+    notesPreview.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setNotesWorkspaceVisibility(true);
+      }
+    };
+  }
+
+  if (openNotesWorkspaceButton) {
+    openNotesWorkspaceButton.onclick = () => setNotesWorkspaceVisibility(true);
+  }
+
+  if (closeNotesWorkspaceButton) {
+    closeNotesWorkspaceButton.onclick = () => {
+      setNotesWorkspaceVisibility(false);
+      setSaveStatus("Notatki z trybu pisania sa juz w tej sesji. Zapisz karte, gdy skonczysz.", "idle");
+    };
+  }
+
+  if (notesWorkspaceInput) {
+    notesWorkspaceInput.oninput = () => {
+      document.getElementById("visit-notes").value = notesWorkspaceInput.value;
+    };
+  }
+
+  if (notesWorkspaceOverlay) {
+    notesWorkspaceOverlay.onclick = (event) => {
+      if (event.target === notesWorkspaceOverlay) {
+        setNotesWorkspaceVisibility(false);
+      }
+    };
+  }
+
   document.getElementById("ai-summary").onclick = () => {
     const notes = document.getElementById("visit-notes").value.trim();
     if (!notes) {
@@ -2531,6 +2641,12 @@ document.getElementById("open-data-tools")?.addEventListener("click", () => {
 
 document.getElementById("close-data-tools")?.addEventListener("click", () => {
   setDataToolsPanelVisibility(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.notesWorkspaceOpen) {
+    setNotesWorkspaceVisibility(false);
+  }
 });
 
 document.getElementById("export-data-store")?.addEventListener("click", () => {

@@ -180,8 +180,12 @@
               </div>
 
               <div class="form-section">
-                <label for="visit-notes">Notatki z sesji</label>
-                <textarea id="visit-notes" rows="5"></textarea>
+                <div class="field-label-row">
+                  <label for="visit-notes">Notatki z sesji</label>
+                  <button class="ghost note-workspace-trigger" id="open-notes-workspace" type="button">Tryb pisania</button>
+                </div>
+                <textarea id="visit-notes" rows="5" readonly placeholder="Dotknij pola, aby otworzyc duzy obszar pisania."></textarea>
+                <p class="field-hint">Dotknij notatek albo przycisku, aby otworzyc duzy obszar roboczy pod pisanie rysikiem.</p>
               </div>
 
               <div class="form-section">
@@ -443,6 +447,30 @@
         </section>
       </main>
     </div>
+
+    <section class="notes-workspace-overlay" id="notes-workspace-overlay" hidden>
+      <div class="notes-workspace-shell">
+        <div class="notes-workspace-header">
+          <div>
+            <p class="panel-label">Tryb pisania</p>
+            <h3 id="notes-workspace-title">Notatki z sesji</h3>
+            <p class="field-hint">Duzy obszar pod spokojne pisanie na tablecie. Tekst wraca od razu do tej wizyty.</p>
+          </div>
+          <div class="inline-actions">
+            <button class="primary" id="close-notes-workspace" type="button">Gotowe</button>
+          </div>
+        </div>
+
+        <div class="notes-workspace-meta" id="notes-workspace-meta"></div>
+
+        <textarea
+          id="notes-workspace-input"
+          class="notes-workspace-input"
+          rows="18"
+          placeholder="Tu wpisuj notatki z sesji..."
+        ></textarea>
+      </div>
+    </section>
 
     <script src="/app.js"></script>
   </body>
