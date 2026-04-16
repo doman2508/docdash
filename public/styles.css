@@ -405,7 +405,7 @@ p {
 
 .reconciliation-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .reconciliation-toolbar {
@@ -440,10 +440,10 @@ p {
 .reconciliation-item {
   display: grid;
   grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1.4fr) minmax(150px, 0.7fr);
-  gap: 12px;
-  align-items: center;
-  padding: 10px 12px;
-  border-radius: 14px;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(78, 50, 24, 0.08);
 }
@@ -460,27 +460,34 @@ p {
 .reconciliation-transaction,
 .reconciliation-result {
   display: grid;
-  gap: 5px;
+  gap: 4px;
+}
+
+.reconciliation-target strong,
+.reconciliation-transaction strong,
+.reconciliation-result strong {
+  font-size: 0.95rem;
+  line-height: 1.18;
 }
 
 .reconciliation-signals {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
 }
 
 .reconciliation-signals span {
-  padding: 4px 8px;
+  padding: 3px 7px;
   border-radius: 999px;
   background: rgba(35, 83, 71, 0.08);
   color: var(--accent);
-  font-size: 0.74rem;
+  font-size: 0.7rem;
 }
 
 .manual-payment-options {
   display: grid;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 4px;
+  margin-top: 2px;
 }
 
 .manual-payment-options small {
@@ -491,14 +498,14 @@ p {
   display: grid;
   gap: 2px;
   justify-content: flex-start;
-  padding: 7px 9px;
-  border-radius: 10px;
+  padding: 5px 7px;
+  border-radius: 9px;
   text-align: left;
 }
 
 .manual-payment-options button span {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
 
 .patient-reconciliation-panel {
@@ -786,7 +793,19 @@ p {
 }
 
 .reconciliation-result button {
-  padding: 8px 10px;
+  padding: 5px 8px;
+  border-radius: 9px;
+  font-size: 0.82rem;
+  line-height: 1.1;
+}
+
+.reconciliation-result .badge {
+  font-size: 0.76rem;
+  padding: 4px 8px;
+}
+
+.reconciliation-result .external-payment-actions {
+  gap: 4px;
 }
 
 .panel {

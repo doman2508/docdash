@@ -997,7 +997,7 @@ function renderBilling() {
 }
 
 function reconciliationPrimaryTarget(match) {
-  const targets = [...(match.targets || [])];
+  const targets = [...(match.visibleTargets || match.targets || [])];
   return targets.sort((left, right) => {
     const leftDate = getDateSortValue(left.dateLabel) || 0;
     const rightDate = getDateSortValue(right.dateLabel) || 0;
@@ -1013,6 +1013,17 @@ function reconciliationPrimaryTarget(match) {
 
     return String(left.patientName || "").localeCompare(String(right.patientName || ""));
   })[0] || null;
+}
+
+function isReconciliationTargetDue(target) {
+  const targetDate = getDateSortValue(target?.dateLabel);
+  const todayDate = getDateSortValue(getCurrentDateKey()) || 0;
+
+  if (targetDate === null) {
+    return false;
+  }
+
+  return targetDate <= todayDate;
 }
 
 function matchPassesReconciliationFilter(match, filterKey) {
@@ -1384,11 +1395,34 @@ function renderPatientReconciliation() {
 
 function renderReconciliation() {
   const reconciliation = state.data.paymentMatches || { summary: {}, matches: [] };
-  const summary = reconciliation.summary || {};
   const matches = reconciliation.matches || [];
-  const sortedMatches = [...matches].sort(compareReconciliationMatches);
+  const dueMatches = matches
+    .map((match) => ({
+      ...match,
+      visibleTargets: (match.targets || []).filter(isReconciliationTargetDue)
+    }))
+    .filter((match) => match.visibleTargets.length);
+  const sortedMatches = [...dueMatches].sort(compareReconciliationMatches);
   const filteredMatches = sortedMatches.filter((match) => matchPassesReconciliationFilter(match, state.reconciliationListFilter));
   const visibleMatches = filteredMatches.slice(0, 500);
+  const sessionIds = new Set();
+  const transactionIds = new Set();
+
+  dueMatches.forEach((match) => {
+    (match.visibleTargets || []).forEach((target) => sessionIds.add(target.id));
+    if (match.transaction?.id) {
+      transactionIds.add(match.transaction.id);
+    }
+  });
+
+  const summary = {
+    sessions: sessionIds.size,
+    transactions: transactionIds.size,
+    confident: dueMatches.filter((match) => match.status === "suggested" && match.confidence === "pewne").length,
+    review: dueMatches.filter((match) => match.status === "suggested" && match.confidence !== "pewne").length,
+    missing: dueMatches.filter((match) => match.status === "missing").length,
+    confirmed: dueMatches.filter((match) => match.status === "confirmed").length
+  };
 
   document.getElementById("reconciliation-summary").innerHTML = `
     <article><span>Sesje</span><strong>${summary.sessions || 0}</strong></article>
@@ -1401,20 +1435,21 @@ function renderReconciliation() {
 
   renderPatientReconciliation();
 
-  if (!matches.length) {
+  if (!dueMatches.length) {
     document.getElementById("reconciliation-list").innerHTML = `
-      <div class="empty-state">Brak dopasowan. Zaimportuj kalendarz ZL i wplywy bankowe, zeby uruchomic walidacje platnosci.</div>
+      <div class="empty-state">Brak pozycji do rozliczenia z przeszlosci i z dzis. Przyszle wizyty nie sa tu pokazywane.</div>
     `;
     return;
   }
 
   const itemsHtml = visibleMatches
     .map((match) => {
-      const targetCopy = (match.targets || [])
+      const visibleTargets = match.visibleTargets || match.targets || [];
+      const targetCopy = visibleTargets
         .map((target) => `${target.dateLabel} ${target.time || ""} - ${target.patientName} - ${formatCurrency(target.amount)}`)
         .join("<br />");
-      const firstTargetId = match.targets?.[0]?.id || "";
-      const firstPatientName = match.targets?.[0]?.patientName || "";
+      const firstTargetId = visibleTargets[0]?.id || "";
+      const firstPatientName = visibleTargets[0]?.patientName || "";
       const openPatientButton = firstPatientName
         ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(firstPatientName)}" data-target-id="${firstTargetId}" data-transaction-id="${match.transaction?.id || ""}">Rozlicz pacjenta</button>`
         : "";
@@ -1430,7 +1465,7 @@ function renderReconciliation() {
       const alternativesCopy = (match.alternatives || [])
         .slice(0, 3)
         .map((candidate) => `
-          <button class="ghost manual-payment-match" type="button" data-target-id="${match.targets?.[0]?.id || ""}" data-transaction-id="${candidate.id}">
+          <button class="ghost manual-payment-match" type="button" data-target-id="${firstTargetId}" data-transaction-id="${candidate.id}">
             <strong>${candidate.transactionDate} - ${candidate.counterparty} - ${formatCurrency(candidate.amount)}</strong>
             <span>${candidate.title || "bez tytulu"}</span>
           </button>
@@ -1503,12 +1538,12 @@ function renderReconciliation() {
           <option value="all" ${state.reconciliationListFilter === "all" ? "selected" : ""}>Wszystkie</option>
         </select>
       </label>
-      <span>${filteredMatches.length} pozycji, sort po dacie wizyty</span>
+      <span>${filteredMatches.length} pozycji z przeszlosci i z dzis, sort po dacie wizyty</span>
     </div>
     ${
       visibleMatches.length
         ? itemsHtml
-        : `<div class="empty-state">Brak pozycji w tym filtrze.</div>`
+        : `<div class="empty-state">Brak pozycji w tym filtrze dla wizyt z przeszlosci i z dzis.</div>`
     }
   `;
 }
