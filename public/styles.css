@@ -439,11 +439,11 @@ p {
 
 .reconciliation-item {
   display: grid;
-  grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1.4fr) minmax(150px, 0.7fr);
-  gap: 10px;
+  grid-template-columns: minmax(200px, 1.05fr) minmax(220px, 1.35fr) minmax(136px, 0.65fr);
+  gap: 8px;
   align-items: start;
-  padding: 8px 10px;
-  border-radius: 12px;
+  padding: 6px 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(78, 50, 24, 0.08);
 }
@@ -460,14 +460,19 @@ p {
 .reconciliation-transaction,
 .reconciliation-result {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .reconciliation-target strong,
 .reconciliation-transaction strong,
 .reconciliation-result strong {
-  font-size: 0.95rem;
-  line-height: 1.18;
+  font-size: 0.9rem;
+  line-height: 1.14;
+}
+
+.reconciliation-item span {
+  font-size: 0.78rem;
+  line-height: 1.15;
 }
 
 .reconciliation-signals {
@@ -477,17 +482,17 @@ p {
 }
 
 .reconciliation-signals span {
-  padding: 3px 7px;
+  padding: 2px 6px;
   border-radius: 999px;
   background: rgba(35, 83, 71, 0.08);
   color: var(--accent);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
 }
 
 .manual-payment-options {
   display: grid;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 3px;
+  margin-top: 1px;
 }
 
 .manual-payment-options small {
@@ -496,16 +501,16 @@ p {
 
 .manual-payment-options button {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   justify-content: flex-start;
-  padding: 5px 7px;
-  border-radius: 9px;
+  padding: 4px 6px;
+  border-radius: 8px;
   text-align: left;
 }
 
 .manual-payment-options button span {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .patient-reconciliation-panel {
@@ -793,19 +798,19 @@ p {
 }
 
 .reconciliation-result button {
-  padding: 5px 8px;
-  border-radius: 9px;
-  font-size: 0.82rem;
+  padding: 4px 7px;
+  border-radius: 8px;
+  font-size: 0.78rem;
   line-height: 1.1;
 }
 
 .reconciliation-result .badge {
-  font-size: 0.76rem;
-  padding: 4px 8px;
+  font-size: 0.72rem;
+  padding: 3px 7px;
 }
 
 .reconciliation-result .external-payment-actions {
-  gap: 4px;
+  gap: 3px;
 }
 
 .panel {

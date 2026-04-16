@@ -1052,7 +1052,7 @@ function isReconciliationTargetDue(target) {
     return false;
   }
 
-  return targetDate <= todayDate;
+  return targetDate < todayDate;
 }
 
 function matchPassesReconciliationFilter(match, filterKey) {
@@ -1466,7 +1466,7 @@ function renderReconciliation() {
 
   if (!dueMatches.length) {
     document.getElementById("reconciliation-list").innerHTML = `
-      <div class="empty-state">Brak pozycji do rozliczenia z przeszlosci i z dzis. Przyszle wizyty nie sa tu pokazywane.</div>
+      <div class="empty-state">Brak pozycji do rozliczenia z przeszlosci. Dzisiejsze i przyszle wizyty nie sa tu pokazywane.</div>
     `;
     return;
   }
@@ -1567,12 +1567,12 @@ function renderReconciliation() {
           <option value="all" ${state.reconciliationListFilter === "all" ? "selected" : ""}>Wszystkie</option>
         </select>
       </label>
-      <span>${filteredMatches.length} pozycji z przeszlosci i z dzis, sort po dacie wizyty</span>
+      <span>${filteredMatches.length} pozycji z przeszlosci, sort po dacie wizyty</span>
     </div>
     ${
       visibleMatches.length
         ? itemsHtml
-        : `<div class="empty-state">Brak pozycji w tym filtrze dla wizyt z przeszlosci i z dzis.</div>`
+        : `<div class="empty-state">Brak pozycji w tym filtrze dla wizyt z przeszlosci.</div>`
     }
   `;
 }
