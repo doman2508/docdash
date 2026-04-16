@@ -413,6 +413,35 @@ function setReconciliationImportPending(isPending) {
   button.textContent = isPending ? "Importuje..." : "Importuj i dopasuj";
 }
 
+function fetchWithTimeout(url, options = {}, timeoutMs = 0) {
+  if (!timeoutMs) {
+    return fetch(url, options);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
+}
+
+function startReconciliationImportStatusTimers() {
+  const timers = [
+    window.setTimeout(() => {
+      setReconciliationImportStatus("Import nadal trwa. Przy wiekszych plikach to moze byc normalne.", "pending");
+    }, 8000),
+    window.setTimeout(() => {
+      setReconciliationImportStatus(
+        "To trwa dluzej niz zwykle. Jesli nic sie nie zmieni, sprobuj mniejszy zakres albo ponow import za chwile.",
+        "pending"
+      );
+    }, 20000)
+  ];
+
+  return () => timers.forEach((timer) => window.clearTimeout(timer));
+}
+
 function setActiveView(viewKey) {
   state.activeView = viewKey;
   const meta = views[viewKey];
@@ -1654,8 +1683,8 @@ function setDataToolsPanelVisibility(isVisible) {
   }
 }
 
-async function refreshBootstrapData() {
-  const response = await fetch("/api/bootstrap");
+async function refreshBootstrapData(options = {}) {
+  const response = await fetchWithTimeout("/api/bootstrap", {}, options.timeoutMs || 0);
 
   if (response.status === 401) {
     window.location.href = "/login.html";
@@ -1804,7 +1833,8 @@ async function runReconciliationImport() {
 
   setSaveStatus("Importuje pliki i dopasowuje platnosci...", "pending");
   setReconciliationImportPending(true);
-  setReconciliationImportStatus("Import trwa. To moze zajac kilka sekund.", "pending");
+  setReconciliationImportStatus("Przygotowuje pliki do importu...", "pending");
+  const stopStatusTimers = startReconciliationImportStatusTimers();
 
   try {
     const payload = {};
@@ -1819,19 +1849,33 @@ async function runReconciliationImport() {
       payload.bankBase64 = await readFileAsBase64(bankFile);
     }
 
-    const response = await fetch("/api/reconciliation/import", {
+    setReconciliationImportStatus("Wysylam pliki na serwer i przeliczam dopasowania...", "pending");
+
+    const response = await fetchWithTimeout("/api/reconciliation/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
-    });
+    }, 90000);
 
     if (!response.ok) {
-      setSaveStatus("Nie udalo sie zaimportowac plikow do rozliczen.", "error");
+      let errorMessage = "Nie udalo sie zaimportowac plikow do rozliczen.";
+      try {
+        const errorPayload = await response.json();
+        if (errorPayload?.error) {
+          errorMessage = errorPayload.error;
+        }
+      } catch (error) {
+        // Ignore JSON parsing problems and use the fallback message.
+      }
+
+      setSaveStatus(errorMessage, "error");
+      setReconciliationImportStatus(errorMessage, "error");
       return;
     }
 
     const result = await response.json();
-    await refreshBootstrapData();
+    setReconciliationImportStatus("Import zapisany. Odswiezam widok danych...", "pending");
+    await refreshBootstrapData({ timeoutMs: 30000 });
     await refreshOpenPatientReconciliation();
     renderAll();
     setActiveView("billing");
@@ -1853,9 +1897,14 @@ async function runReconciliationImport() {
       "success"
     );
   } catch (error) {
-    setSaveStatus("Nie udalo sie odczytac plikow rozliczeniowych.", "error");
-    setReconciliationImportStatus("Import nie udal sie. Sprawdz plik i sprobuj jeszcze raz.", "error");
+    const aborted = error?.name === "AbortError";
+    const message = aborted
+      ? "Import trwa zbyt dlugo. Sprobuj mniejszy zakres pliku albo ponow za chwile."
+      : "Nie udalo sie odczytac plikow rozliczeniowych.";
+    setSaveStatus(message, "error");
+    setReconciliationImportStatus(message, "error");
   } finally {
+    stopStatusTimers();
     setReconciliationImportPending(false);
   }
 }

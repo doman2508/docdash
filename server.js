@@ -2435,7 +2435,7 @@ const server = http.createServer(async (req, res) => {
       writeData(data);
       sendJson(res, 200, result);
     } catch (error) {
-      sendJson(res, 400, { error: "Unable to import reconciliation files" });
+      sendJson(res, 400, { error: error?.message || "Unable to import reconciliation files" });
     }
 
     return;
