@@ -348,14 +348,17 @@ function getPatients() {
         .reduce((sum, visit) => sum + visit.payment.amount, 0);
       const pending = totalDue - totalPaid;
       const nextVisit = visits.find((visit) => visit.nextVisit.status === "scheduled");
+      const importOnlyRows = importedRows.filter((row) => !row.linkedVisitId);
       const attention = getPatientAttentionMeta(pending, importedRows);
 
       return {
         patientName,
         visits,
         importedRows,
-        visitCount: visits.length,
+        visitCount: visits.length + importOnlyRows.length,
         importedCount: importedRows.length,
+        importOnlyCount: importOnlyRows.length,
+        unresolvedImportCount: importedRows.filter(importRowNeedsAttention).length,
         totalDue,
         totalPaid,
         pending,
@@ -373,8 +376,54 @@ function getSelectedPatient() {
   return patients.find((patient) => patient.patientName === state.selectedPatientName) || patients[0];
 }
 
+function importRowTargetId(row) {
+  if (!row?.importId || !row?.id) {
+    return "";
+  }
+
+  return `import:${row.importId}:${row.id}`;
+}
+
+function isImportRowSettled(row) {
+  return Boolean(
+    row?.paymentConfirmed ||
+    row?.bankTransactionId ||
+    row?.externalPaymentMethod ||
+    row?.paymentIgnored
+  );
+}
+
+function needsImportWorkflowCard(row) {
+  return !row?.linkedVisitId;
+}
+
+function importRowNeedsAttention(row) {
+  return needsImportWorkflowCard(row) && !isImportRowSettled(row);
+}
+
+function getImportRowPaymentMeta(row) {
+  if (row?.paymentIgnored) {
+    return {
+      label: row.paymentStatus || "pominieta",
+      tone: "neutral"
+    };
+  }
+
+  if (isImportRowSettled(row)) {
+    return {
+      label: row.paymentStatus || "oplacone",
+      tone: "success"
+    };
+  }
+
+  return {
+    label: "nierozliczona",
+    tone: "warning"
+  };
+}
+
 function getPatientAttentionMeta(pending, importedRows = []) {
-  const openImports = (importedRows || []).filter((row) => !row.processed).length;
+  const openImports = (importedRows || []).filter(importRowNeedsAttention).length;
 
   if (pending > 0 && openImports > 0) {
     return {
@@ -396,7 +445,7 @@ function getPatientAttentionMeta(pending, importedRows = []) {
     return {
       label: "Importy ZL",
       tone: "warning",
-      detail: `${openImports} wizyty z importu ZL czekaja jeszcze na przejecie do workflow.`
+      detail: `${openImports} wizyty z importu ZL nadal czekaja na rozliczenie lub utworzenie karty sesji.`
     };
   }
 
@@ -830,7 +879,7 @@ function renderPatients() {
         <article class="patient-item ${patient.patientName === selectedPatient.patientName ? "selected" : ""}" data-patient-name="${patient.patientName}">
           <div>
             <h4>${patient.patientName}</h4>
-            <span>${patient.visitCount} wizyt - ZL: ${patient.importedCount} - saldo: ${formatCurrency(patient.pending)}</span>
+            <span>${patient.visitCount} sesji - ZL do ogarniecia: ${patient.unresolvedImportCount || 0} - saldo: ${formatCurrency(patient.pending)}</span>
           </div>
           <span class="badge ${patient.activeStatusTone || "neutral"}" title="${patient.activeStatusDetail || ""}">${patient.activeStatus}</span>
         </article>
@@ -840,12 +889,12 @@ function renderPatients() {
 
   document.getElementById("patient-summary-grid").innerHTML = `
     <div class="patient-summary-card">
-      <p>Wizyty</p>
+      <p>Sesje</p>
       <strong>${selectedPatient.visitCount}</strong>
     </div>
     <div class="patient-summary-card">
-      <p>ZL</p>
-      <strong>${selectedPatient.importedRows.filter((row) => !row.processed).length}</strong>
+      <p>ZL do ogarniecia</p>
+      <strong>${selectedPatient.unresolvedImportCount || 0}</strong>
     </div>
     <div class="patient-summary-card">
       <p>Saldo</p>
@@ -862,7 +911,9 @@ function renderPatients() {
       type: "visit",
       data: visit
     })),
-    ...selectedPatient.importedRows.map((row) => ({
+    ...selectedPatient.importedRows
+      .filter((row) => !row.linkedVisitId)
+      .map((row) => ({
       type: "import",
       data: row
     }))
@@ -900,19 +951,19 @@ function renderPatients() {
       }
 
       const row = item.data;
+      const paymentMeta = getImportRowPaymentMeta(row);
+      const targetId = importRowTargetId(row);
       return `
         <article class="history-item">
           <div>
-            <h4>${row.dateLabel} - import ZL</h4>
+            <h4>${row.dateLabel}${row.time ? ` - ${row.time}` : ""} - ZL</h4>
             <span>${row.serviceName} - ${row.bookingStatus} - ${formatCurrency(row.amount)}</span>
           </div>
           <div class="inbox-actions">
-            <span class="badge ${row.processed ? "success" : "warning"}">${row.processed ? "przetworzone" : "do przejecia"}</span>
-            ${
-              row.processed
-                ? `<button class="ghost history-open" type="button" data-history-visit="${row.linkedVisitId}">Otworz wizyte</button>`
-                : `<button class="primary promote-import" type="button" data-import-id="${row.importId}" data-row-id="${row.id}">Przenies do workflow</button>`
-            }
+            <span class="badge neutral">ZL</span>
+            <span class="badge ${paymentMeta.tone}">${paymentMeta.label}</span>
+            ${importRowNeedsAttention(row) && targetId ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(selectedPatient.patientName)}" data-target-id="${targetId}" data-transaction-id="">Rozliczenie</button>` : ""}
+            <button class="${importRowNeedsAttention(row) ? "secondary" : "ghost"} promote-import" type="button" data-import-id="${row.importId}" data-row-id="${row.id}">Utworz karte sesji</button>
           </div>
         </article>
       `;
