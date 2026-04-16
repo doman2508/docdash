@@ -298,6 +298,14 @@ function compareTransactionHistoryDesc(left, right) {
   return String(left?.counterparty || "").localeCompare(String(right?.counterparty || ""));
 }
 
+function sessionIdentityKey(session) {
+  if (!session) {
+    return "";
+  }
+
+  return `${normalizeSearchText(session.patientName)}|${normalizeDateKey(session.dateLabel) || ""}|${String(session.time || "").trim()}|${Number(session.amount || 0)}`;
+}
+
 function getSelectedVisit() {
   if (!state.data) {
     return null;
@@ -384,13 +392,118 @@ function importRowTargetId(row) {
   return `import:${row.importId}:${row.id}`;
 }
 
-function isImportRowSettled(row) {
-  return Boolean(
+function isPendingImportPaymentLabel(label) {
+  const normalized = normalizeSearchText(label);
+  return normalized.includes("nie zaplacono") || normalized.includes("oczekuje");
+}
+
+function getExternalPaymentMeta(method) {
+  switch (method) {
+    case "cash":
+      return { label: "gotowka", tone: "success", ignored: false };
+    case "other_account":
+      return { label: "inne konto", tone: "success", ignored: false };
+    case "ignored":
+      return { label: "pominieta", tone: "neutral", ignored: true };
+    default:
+      return null;
+  }
+}
+
+let confirmedPaymentMatchLookupCache = null;
+let confirmedPaymentMatchLookupSource = null;
+
+function getConfirmedPaymentMatchLookup() {
+  const paymentMatches = state.data?.paymentMatches || { generatedAt: "", matches: [] };
+  const matches = paymentMatches.matches || [];
+
+  if (confirmedPaymentMatchLookupCache && confirmedPaymentMatchLookupSource === matches) {
+    return confirmedPaymentMatchLookupCache;
+  }
+
+  const byTargetId = new Map();
+  const bySessionKey = new Map();
+
+  matches
+    .filter((match) => match.status === "confirmed")
+    .forEach((match) => {
+      (match.targets || []).forEach((target) => {
+        if (target?.id && !byTargetId.has(target.id)) {
+          byTargetId.set(target.id, match);
+        }
+
+        const key = sessionIdentityKey(target);
+        if (key && !bySessionKey.has(key)) {
+          bySessionKey.set(key, match);
+        }
+      });
+    });
+
+  confirmedPaymentMatchLookupSource = matches;
+  confirmedPaymentMatchLookupCache = { byTargetId, bySessionKey };
+  return confirmedPaymentMatchLookupCache;
+}
+
+function getConfirmedImportRowMatch(row) {
+  if (!row) {
+    return null;
+  }
+
+  const lookup = getConfirmedPaymentMatchLookup();
+  const targetId = importRowTargetId(row);
+  return lookup.byTargetId.get(targetId) || lookup.bySessionKey.get(sessionIdentityKey(row)) || null;
+}
+
+function getImportRowPaymentMeta(row) {
+  const confirmedMatch = getConfirmedImportRowMatch(row);
+  const externalMeta = getExternalPaymentMeta(row?.externalPaymentMethod);
+  const matchedExternalMeta = getExternalPaymentMeta(confirmedMatch?.externalPayment?.method);
+  const ignored = Boolean(row?.paymentIgnored || matchedExternalMeta?.ignored || externalMeta?.ignored);
+  const settled = Boolean(
+    confirmedMatch ||
     row?.paymentConfirmed ||
     row?.bankTransactionId ||
     row?.externalPaymentMethod ||
     row?.paymentIgnored
   );
+
+  if (ignored) {
+    return {
+      settled: true,
+      ignored: true,
+      label: row?.paymentStatus || matchedExternalMeta?.label || externalMeta?.label || "pominieta",
+      tone: "neutral",
+      match: confirmedMatch
+    };
+  }
+
+  if (settled) {
+    const rawLabel = String(row?.paymentStatus || "").trim();
+    const label = matchedExternalMeta?.label
+      || (!isPendingImportPaymentLabel(rawLabel) ? rawLabel : "")
+      || externalMeta?.label
+      || "oplacone";
+
+    return {
+      settled: true,
+      ignored: false,
+      label,
+      tone: "success",
+      match: confirmedMatch
+    };
+  }
+
+  return {
+    settled: false,
+    ignored: false,
+    label: "nierozliczona",
+    tone: "warning",
+    match: null
+  };
+}
+
+function isImportRowSettled(row) {
+  return getImportRowPaymentMeta(row).settled;
 }
 
 function needsImportWorkflowCard(row) {
@@ -399,27 +512,6 @@ function needsImportWorkflowCard(row) {
 
 function importRowNeedsAttention(row) {
   return needsImportWorkflowCard(row) && !isImportRowSettled(row);
-}
-
-function getImportRowPaymentMeta(row) {
-  if (row?.paymentIgnored) {
-    return {
-      label: row.paymentStatus || "pominieta",
-      tone: "neutral"
-    };
-  }
-
-  if (isImportRowSettled(row)) {
-    return {
-      label: row.paymentStatus || "oplacone",
-      tone: "success"
-    };
-  }
-
-  return {
-    label: "nierozliczona",
-    tone: "warning"
-  };
 }
 
 function getPatientAttentionMeta(pending, importedRows = []) {
@@ -2063,6 +2155,18 @@ async function openPatientReconciliation(patientName, focusSessionId = null, foc
   if (!ledger) {
     setSaveStatus("Nie udalo sie pobrac rozliczenia pacjenta.", "error");
     return;
+  }
+
+  if (ledger.paymentMatches) {
+    state.data = {
+      ...state.data,
+      paymentMatches: ledger.paymentMatches
+    };
+
+    if (state.activeView === "patients") {
+      renderPatients();
+      attachActions();
+    }
   }
 
   state.reconciliationLedger = ledger;

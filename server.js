@@ -2332,7 +2332,9 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === "/api/bootstrap" && req.method === "GET") {
-    sendJson(res, 200, readData());
+    const data = readData();
+    rebuildPaymentMatches(data);
+    sendJson(res, 200, data);
     return;
   }
 
@@ -2396,7 +2398,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    sendJson(res, 200, ledger);
+    sendJson(res, 200, {
+      ...ledger,
+      paymentMatches: data.paymentMatches
+    });
     return;
   }
 
