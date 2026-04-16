@@ -238,10 +238,6 @@
                   <textarea id="visit-next-note" rows="3"></textarea>
                 </div>
 
-                <div class="inline-actions">
-                  <button class="secondary" id="save-visit" type="button">Zapisz jako robocze</button>
-                  <button class="primary" id="close-visit" type="button">Zamknij wizyte</button>
-                </div>
               </section>
 
               <section class="panel compact-panel visit-billing-panel">
@@ -290,6 +286,25 @@
                   <button class="secondary" id="mark-paid" type="button">Oznacz jako zaplacone</button>
                   <button class="primary" id="issue-document" type="button">Wystaw dokument</button>
                   <button class="ghost" id="open-validation" type="button">Walidacja z bankiem</button>
+                </div>
+              </section>
+
+              <section class="panel compact-panel visit-closeout-panel">
+                <div class="panel-header compact-header">
+                  <div>
+                    <p class="panel-label">Domkniecie sesji</p>
+                    <h3>Co zostalo po spotkaniu</h3>
+                    <p class="field-hint" id="visit-closeout-copy"></p>
+                  </div>
+                  <span class="badge neutral" id="visit-closeout-badge">sprawdz status</span>
+                </div>
+
+                <ul class="checklist compact-checklist" id="visit-closeout-list"></ul>
+
+                <div class="inline-actions visit-closeout-actions">
+                  <button class="secondary" id="save-visit" type="button">Zapisz jako robocze</button>
+                  <button class="ghost" id="close-visit" type="button">Zamknij wizyte</button>
+                  <button class="primary" id="close-and-settle" type="button">Zamknij i rozlicz</button>
                 </div>
               </section>
             </div>

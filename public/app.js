@@ -1052,6 +1052,7 @@ function renderBilling() {
     <div><span>Oplacone sesje</span><strong>${state.data.visits.filter((entry) => isVisitChargeable(entry) && entry.payment.status === "paid").length}</strong></div>
   `;
 
+  renderVisitCloseoutPreview();
   renderReconciliation();
 }
 
@@ -1066,6 +1067,134 @@ function syncNotesWorkspacePreview(value) {
   if (workspaceInput && state.notesWorkspaceOpen) {
     workspaceInput.value = value || "";
   }
+}
+
+function nextVisitChecklistEntry(nextVisit) {
+  if (nextVisit.status === "scheduled") {
+    return { label: "Kolejna wizyta ustawiona", done: true };
+  }
+
+  if (nextVisit.status === "none") {
+    return { label: "Brak kontynuacji potwierdzony", done: true };
+  }
+
+  return { label: "Termin kolejnej wizyty do wpisania", done: false };
+}
+
+function isDocumentRequired(outcome, payment) {
+  return Boolean(outcome?.chargeable) && payment?.status !== "ignored" && payment?.documentType !== "none";
+}
+
+function derivePaymentFollowUpLabel(payment, documentNeeded) {
+  if (payment.status === "paid") {
+    return documentNeeded && !payment.documentIssued ? "oplacone, dokument do wystawienia" : "oplacone po sesji";
+  }
+
+  if (payment.status === "partial") {
+    return documentNeeded ? "platnosc czesciowa, dokument do dopilnowania" : "platnosc czesciowa po sesji";
+  }
+
+  return documentNeeded ? "oczekuje na platnosc i dokument" : "oczekuje na platnosc po sesji";
+}
+
+function buildCloseoutState(visit, visitPatch, paymentPatch) {
+  const outcome = getSessionOutcomeMeta(visitPatch?.sessionOutcome || visit.sessionOutcome, visit.dateLabel);
+  const nextVisit = visitPatch?.nextVisit || visit.nextVisit;
+  const payment = paymentPatch?.payment || visit.payment;
+  const summaryText = String(visitPatch?.summary ?? visit.summary ?? "").trim();
+  const paymentNeeded = outcome.chargeable && payment.status !== "ignored";
+  const documentNeeded = isDocumentRequired(outcome, payment);
+  const nextVisitEntry = nextVisitChecklistEntry(nextVisit);
+
+  const checklist = [
+    {
+      label:
+        outcome.key === "completed"
+          ? "Sesja oznaczona jako odbyta"
+          : outcome.key === "cancelled"
+            ? "Sesja oznaczona jako nieodbyta"
+            : outcome.key === "rescheduled"
+              ? "Sesja oznaczona jako przeniesiona"
+              : outcome.key === "no_show_paid"
+                ? "Sesja oznaczona jako no-show platny"
+                : "Wynik sesji jeszcze nieoznaczony",
+      done: outcome.key !== "scheduled"
+    },
+    { label: summaryText ? "Podsumowanie wizyty uzupelnione" : "Brak podsumowania wizyty", done: Boolean(summaryText) },
+    nextVisitEntry,
+    {
+      label: !paymentNeeded
+        ? "Ta sesja nie buduje naleznosci"
+        : payment.status === "paid"
+          ? `Platnosc ${formatCurrency(payment.amount)} potwierdzona`
+          : payment.status === "partial"
+            ? `Platnosc ${formatCurrency(payment.amount)} oznaczona jako czesciowa`
+            : `Platnosc ${formatCurrency(payment.amount)} nadal oczekuje`,
+      done: !paymentNeeded || payment.status === "paid"
+    },
+    {
+      label: !documentNeeded
+        ? "Dokument sprzedazy nie jest potrzebny"
+        : payment.documentIssued
+          ? `${payment.documentType === "invoice" ? "Faktura" : "Paragon"} gotowe`
+          : `${payment.documentType === "invoice" ? "Faktura" : "Paragon"} do wystawienia`,
+      done: !documentNeeded || payment.documentIssued
+    }
+  ];
+
+  const remaining = checklist.filter((item) => !item.done);
+  return {
+    checklist,
+    remaining,
+    remainingCount: remaining.length,
+    paymentNeeded,
+    documentNeeded,
+    payment,
+    outcome,
+    nextVisit
+  };
+}
+
+function getCurrentVisitEditorState() {
+  const visit = getSelectedVisit();
+  const visitPatch = collectVisitPatch();
+  const paymentPatch = collectBillingPatch();
+
+  return {
+    visit,
+    visitPatch,
+    paymentPatch,
+    closeoutState: buildCloseoutState(visit, visitPatch, paymentPatch)
+  };
+}
+
+function renderVisitCloseoutPreview() {
+  const list = document.getElementById("visit-closeout-list");
+  const badge = document.getElementById("visit-closeout-badge");
+  const copy = document.getElementById("visit-closeout-copy");
+
+  if (!list || !badge || !copy) {
+    return;
+  }
+
+  const { closeoutState } = getCurrentVisitEditorState();
+  const remainingLabels = closeoutState.remaining.slice(0, 2).map((item) => item.label.toLowerCase());
+  const helper =
+    closeoutState.remainingCount === 0
+      ? "Mozesz domknac te sesje jednym ruchem."
+      : closeoutState.remainingCount === 1
+        ? `Brakuje jeszcze: ${remainingLabels[0]}.`
+        : `Brakuje jeszcze ${closeoutState.remainingCount} rzeczy, np. ${remainingLabels.join(" i ")}.`;
+
+  copy.textContent = helper;
+  badge.textContent = closeoutState.remainingCount === 0
+    ? "gotowe do zamkniecia"
+    : `${closeoutState.remainingCount} do domkniecia`;
+  badge.className = `badge ${closeoutState.remainingCount === 0 ? "success" : "warning"}`;
+
+  list.innerHTML = closeoutState.checklist
+    .map((item) => `<li class="${item.done ? "done" : "todo"}">${item.label}</li>`)
+    .join("");
 }
 
 function renderNotesWorkspaceControls() {
@@ -2240,6 +2369,11 @@ function collectBillingPatch() {
   const visit = getSelectedVisit();
   const status = document.querySelector('[data-choice-group="payment-status"].active').dataset.choiceValue;
   const documentType = document.querySelector('[data-choice-group="payment-document"].active').dataset.choiceValue;
+  const documentIssued = documentType === "none"
+    ? false
+    : visit.payment.documentType === documentType
+      ? Boolean(visit.payment.documentIssued)
+      : false;
 
   return {
     payment: {
@@ -2249,55 +2383,63 @@ function collectBillingPatch() {
       statusLabel: status === "paid" ? "oplacone" : status === "partial" ? "platnosc czesciowa" : "platnosc oczekuje",
       method: document.querySelector('[data-choice-group="payment-method"].active').dataset.choiceValue,
       documentType,
-      documentIssued: documentType !== "none"
+      documentIssued
     }
   };
 }
 
 function buildChecklist(visit, visitPatch, paymentPatch) {
-  const outcome = getSessionOutcomeMeta(visitPatch?.sessionOutcome || visit.sessionOutcome, visit.dateLabel);
-  const nextVisit = visitPatch?.nextVisit || visit.nextVisit;
-  const payment = paymentPatch?.payment || visit.payment;
-  const summaryText = String(visitPatch?.summary ?? visit.summary ?? "").trim();
-  const paymentNeeded = outcome.chargeable && payment.status !== "ignored";
+  return buildCloseoutState(visit, visitPatch, paymentPatch).checklist;
+}
 
-  return [
-    {
-      label:
-        outcome.key === "completed"
-          ? "Sesja oznaczona jako odbyta"
-          : outcome.key === "cancelled"
-            ? "Sesja oznaczona jako nieodbyta"
-            : outcome.key === "rescheduled"
-              ? "Sesja oznaczona jako przeniesiona"
-              : outcome.key === "no_show_paid"
-                ? "Sesja oznaczona jako no-show platny"
-                : "Wynik sesji jeszcze nieoznaczony",
-      done: outcome.key !== "scheduled"
-    },
-    { label: "Notatka robocza zapisana", done: true },
-    { label: summaryText ? "Podsumowanie wizyty uzupelnione" : "Brak podsumowania wizyty", done: Boolean(summaryText) },
-    {
-      label: nextVisit.status === "scheduled" ? "Kolejna wizyta ustawiona" : "Brak wpisanej kolejnej wizyty w ZL",
-      done: nextVisit.status === "scheduled"
-    },
-    {
-      label: !paymentNeeded
-        ? "Ta sesja nie buduje naleznosci"
+function buildVisitSavePayload(options = {}) {
+  const visit = getSelectedVisit();
+  const visitPatch = collectVisitPatch();
+  const paymentPatch = collectBillingPatch();
+  const closeoutState = buildCloseoutState(visit, visitPatch, paymentPatch);
+  const payment = {
+    ...paymentPatch.payment
+  };
+
+  if (options.forcePaid) {
+    payment.status = "paid";
+    payment.statusLabel = "oplacone";
+  }
+
+  if (options.autoIssueDocument && closeoutState.documentNeeded) {
+    payment.documentIssued = true;
+  }
+
+  const finalDocumentNeeded = isDocumentRequired(closeoutState.outcome, payment);
+  const finalPaymentNeeded = closeoutState.outcome.chargeable && payment.status !== "ignored";
+  payment.followUpLabel = derivePaymentFollowUpLabel(payment, finalDocumentNeeded);
+
+  const followUp = {
+    ...visit.followUp,
+    documentReady: !finalDocumentNeeded || payment.documentIssued,
+    lastActionLabel: options.closeVisit
+      ? !finalPaymentNeeded
+        ? "Sesja zamknieta po ustaleniach"
         : payment.status === "paid"
-          ? `Platnosc ${formatCurrency(payment.amount)} potwierdzona`
-          : `Platnosc ${formatCurrency(payment.amount)} nadal oczekuje`,
-      done: !paymentNeeded || payment.status === "paid"
-    },
-    {
-      label: !paymentNeeded
-        ? "Dokument sprzedazy nie jest potrzebny"
-        : payment.documentIssued
-          ? "Dokument sprzedazy wystawiony"
-          : "Dokument sprzedazy nie wystawiony",
-      done: !paymentNeeded || payment.documentIssued
+        ? "Sesja zamknieta i rozliczona"
+        : "Sesja zamknieta, platnosc do dopilnowania"
+      : payment.documentIssued
+        ? "Dokument sprzedazy przygotowany"
+        : visit.followUp?.lastActionLabel || "Karta zaktualizowana"
+  };
+
+  return {
+    visit,
+    visitPatch,
+    paymentPatch: { payment },
+    payload: {
+      ...visitPatch,
+      payment,
+      followUp,
+      ...(options.closeVisit ? { status: "closed", workflowStage: "closed" } : {}),
+      closureChecklist: buildChecklist(visit, visitPatch, { payment })
     }
-  ];
+  };
 }
 
 function attachActions() {
@@ -2306,6 +2448,9 @@ function attachActions() {
       setChoiceState(button.dataset.choiceGroup, button.dataset.choiceValue);
       if (button.dataset.choiceGroup === "session-outcome") {
         updateSessionOutcomeHint(button.dataset.choiceValue, getSelectedVisit()?.dateLabel);
+      }
+      if (["session-outcome", "next-status", "payment-status", "payment-method", "payment-document"].includes(button.dataset.choiceGroup)) {
+        renderVisitCloseoutPreview();
       }
     };
   });
@@ -2338,49 +2483,38 @@ function attachActions() {
   }
 
   document.getElementById("save-visit").onclick = async () => {
-    await saveVisit(collectVisitPatch(), "Karta wizyty zapisana.");
-  };
-
-  document.getElementById("close-visit").onclick = async () => {
-    const visit = getSelectedVisit();
-    const visitPatch = collectVisitPatch();
+    const { visit, visitPatch, paymentPatch, payload } = buildVisitSavePayload();
     await saveVisit(
       {
-        ...visitPatch,
-        status: "closed",
-        workflowStage: "closed",
-        closureChecklist: buildChecklist(visit, visitPatch)
+        ...payload,
+        closureChecklist: buildChecklist(visit, visitPatch, paymentPatch)
       },
-      "Wizyta domknieta operacyjnie."
+      "Karta wizyty zapisana."
     );
   };
 
-  document.getElementById("mark-paid").onclick = async () => {
-    const visit = getSelectedVisit();
-    const paymentPatch = collectBillingPatch();
-    paymentPatch.payment.status = "paid";
-    paymentPatch.payment.statusLabel = "oplacone";
-    paymentPatch.payment.followUpLabel = "oplacone tego samego dnia";
+  document.getElementById("close-visit").onclick = async () => {
+    const { payload } = buildVisitSavePayload({ closeVisit: true });
+    await saveVisit(payload, "Wizyta domknieta operacyjnie.");
+  };
 
+  document.getElementById("close-and-settle").onclick = async () => {
+    const { payload } = buildVisitSavePayload({ closeVisit: true, autoIssueDocument: true });
+    await saveVisit(payload, "Sesja zamknieta, a rozliczenie zapisane wedlug wybranych ustawien.");
+  };
+
+  document.getElementById("mark-paid").onclick = async () => {
+    const { payload } = buildVisitSavePayload({ forcePaid: true });
     await saveVisit(
-      {
-        payment: paymentPatch.payment,
-        closureChecklist: buildChecklist(visit, null, paymentPatch)
-      },
+      payload,
       "Platnosc oznaczona jako oplacona."
     );
   };
 
   document.getElementById("issue-document").onclick = async () => {
-    const visit = getSelectedVisit();
-    const paymentPatch = collectBillingPatch();
-    paymentPatch.payment.documentIssued = paymentPatch.payment.documentType !== "none";
-
+    const { payload } = buildVisitSavePayload({ autoIssueDocument: true });
     await saveVisit(
-      {
-        payment: paymentPatch.payment,
-        closureChecklist: buildChecklist(visit, null, paymentPatch)
-      },
+      payload,
       "Dokument sprzedazy zaktualizowany."
     );
   };
@@ -2476,13 +2610,27 @@ function attachActions() {
     const shortened = notes.length > 220 ? `${notes.slice(0, 220)}...` : notes;
     document.getElementById("visit-summary").value = `AI draft: ${shortened}`;
     setSaveStatus("Wstawiono robocze podsumowanie AI.", "success");
+    renderVisitCloseoutPreview();
   };
 
   document.getElementById("visit-template").onclick = () => {
     document.getElementById("visit-summary").value =
       "Cel sesji: ...\nNajwazniejsze obserwacje: ...\nUstalenia: ...\nPraca domowa / kolejny krok: ...";
     setSaveStatus("Wstawiono szablon podsumowania.", "success");
+    renderVisitCloseoutPreview();
   };
+
+  [
+    "visit-summary",
+    "visit-next-planned",
+    "visit-next-note",
+    "billing-amount"
+  ].forEach((id) => {
+    const field = document.getElementById(id);
+    if (field) {
+      field.oninput = () => renderVisitCloseoutPreview();
+    }
+  });
 
   document.querySelectorAll("[data-visit-jump]").forEach((button) => {
     button.onclick = () => {

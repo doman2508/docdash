@@ -448,6 +448,38 @@ p {
   align-items: center;
 }
 
+.visit-closeout-panel .badge {
+  padding: 5px 8px;
+  font-size: 0.72rem;
+}
+
+.visit-closeout-panel .field-hint {
+  max-width: 34ch;
+}
+
+.compact-checklist {
+  margin-bottom: 12px;
+  gap: 6px;
+}
+
+.compact-checklist li {
+  padding: 9px 11px;
+  border-radius: 12px;
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+
+.visit-closeout-actions {
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.visit-closeout-actions .primary,
+.visit-closeout-actions .secondary,
+.visit-closeout-actions .ghost {
+  white-space: nowrap;
+}
+
 .validation-view .panel {
   padding: 18px;
 }
