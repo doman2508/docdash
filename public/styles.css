@@ -355,6 +355,27 @@ p {
 
 .reconciliation-actions {
   margin-bottom: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.reconciliation-import-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.reconciliation-import-status[data-state="pending"] {
+  color: var(--warning);
+}
+
+.reconciliation-import-status[data-state="success"] {
+  color: var(--accent);
+}
+
+.reconciliation-import-status[data-state="error"] {
+  color: var(--brand-dark);
 }
 
 .reconciliation-summary {

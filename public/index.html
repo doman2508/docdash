@@ -389,9 +389,12 @@
                 <input id="reconciliation-bank-file" type="file" accept=".csv,text/csv" />
               </div>
 
-              <div class="inline-actions reconciliation-actions">
-                <button class="primary" id="run-reconciliation-import" type="button">Importuj i dopasuj</button>
-                <button class="secondary" id="confirm-confident-matches" type="button">Potwierdz pewne</button>
+              <div class="reconciliation-actions">
+                <div class="inline-actions">
+                  <button class="primary" id="run-reconciliation-import" type="button">Importuj i dopasuj</button>
+                  <button class="secondary" id="confirm-confident-matches" type="button">Potwierdz pewne</button>
+                </div>
+                <p class="reconciliation-import-status" id="reconciliation-import-status" data-state="idle">Mozesz wrzucic sam CSV z banku albo bank + ZL.</p>
               </div>
             </div>
 

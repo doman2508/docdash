@@ -393,6 +393,26 @@ function setSaveStatus(message, type = "idle") {
   saveStatusEl.dataset.state = type;
 }
 
+function setReconciliationImportStatus(message, type = "idle") {
+  const status = document.getElementById("reconciliation-import-status");
+  if (!status) {
+    return;
+  }
+
+  status.textContent = message;
+  status.dataset.state = type;
+}
+
+function setReconciliationImportPending(isPending) {
+  const button = document.getElementById("run-reconciliation-import");
+  if (!button) {
+    return;
+  }
+
+  button.disabled = Boolean(isPending);
+  button.textContent = isPending ? "Importuje..." : "Importuj i dopasuj";
+}
+
 function setActiveView(viewKey) {
   state.activeView = viewKey;
   const meta = views[viewKey];
@@ -1743,10 +1763,13 @@ async function runReconciliationImport() {
 
   if (!zlFile && !bankFile) {
     setSaveStatus("Wybierz plik ZL albo CSV z banku.", "error");
+    setReconciliationImportStatus("Najpierw wybierz plik ZL albo CSV z banku.", "error");
     return;
   }
 
   setSaveStatus("Importuje pliki i dopasowuje platnosci...", "pending");
+  setReconciliationImportPending(true);
+  setReconciliationImportStatus("Import trwa. To moze zajac kilka sekund.", "pending");
 
   try {
     const payload = {};
@@ -1777,12 +1800,28 @@ async function runReconciliationImport() {
     await refreshOpenPatientReconciliation();
     renderAll();
     setActiveView("billing");
+    const importedParts = [];
+    if (result.zl) {
+      importedParts.push(`ZL: ${result.zl.rows} wizyt`);
+    }
+
+    if (result.bank) {
+      importedParts.push(`bank: ${result.bank.transactions} wplywow`);
+    }
+
+    setReconciliationImportStatus(
+      `Gotowe. Zaimportowano ${importedParts.join(", ") || "pliki"} i przeliczono dopasowania.`,
+      "success"
+    );
     setSaveStatus(
       `Dopasowanie gotowe: ${result.paymentMatches.summary.suggested} propozycji, ${result.paymentMatches.summary.missing} bez platnosci.`,
       "success"
     );
   } catch (error) {
     setSaveStatus("Nie udalo sie odczytac plikow rozliczeniowych.", "error");
+    setReconciliationImportStatus("Import nie udal sie. Sprawdz plik i sprobuj jeszcze raz.", "error");
+  } finally {
+    setReconciliationImportPending(false);
   }
 }
 
