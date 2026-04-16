@@ -303,6 +303,24 @@ p {
   white-space: nowrap;
 }
 
+.notes-workspace-toolbar {
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.notes-workspace-toolbar .ghost.active {
+  border-color: rgba(196, 91, 53, 0.3);
+  background: rgba(196, 91, 53, 0.08);
+  color: var(--brand-dark);
+}
+
+.notes-workspace-toolbar .ghost:disabled {
+  opacity: 0.42;
+  cursor: default;
+  transform: none;
+}
+
 .primary:hover,
 .secondary:hover,
 .ghost:hover,
@@ -627,6 +645,8 @@ p {
 }
 
 .notes-workspace-shell {
+  --notes-font-size: 1.08rem;
+  --notes-line-height: 1.7;
   width: min(1180px, calc(100vw - 28px));
   min-height: calc(100vh - 28px);
   max-height: calc(100vh - 28px);
@@ -662,9 +682,34 @@ p {
   resize: none;
   padding: 22px 24px;
   border-radius: 24px;
-  font-size: 1.08rem;
-  line-height: 1.7;
+  font-size: var(--notes-font-size);
+  line-height: var(--notes-line-height);
   background: rgba(255, 255, 255, 0.92);
+  overscroll-behavior: contain;
+  -webkit-user-select: text;
+}
+
+.notes-workspace-shell.notes-ruled .notes-workspace-input {
+  background-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) calc((1em * var(--notes-line-height)) - 1px),
+    rgba(196, 91, 53, 0.11) calc((1em * var(--notes-line-height)) - 1px),
+    rgba(196, 91, 53, 0.11) calc(1em * var(--notes-line-height))
+  );
+  background-size: 100% calc(1em * var(--notes-line-height));
+}
+
+.notes-workspace-shell.notes-focus {
+  gap: 8px;
+  padding: 12px;
+}
+
+.notes-workspace-shell.notes-focus .notes-workspace-meta {
+  display: none;
+}
+
+.notes-workspace-shell.notes-focus .notes-workspace-header .field-hint {
+  display: none;
 }
 
 .patient-reconciliation-card {
@@ -1554,6 +1599,15 @@ input {
   .notes-workspace-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .notes-workspace-toolbar {
+    justify-content: stretch;
+  }
+
+  .notes-workspace-toolbar > * {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 
   .notes-workspace-overlay {

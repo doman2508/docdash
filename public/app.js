@@ -42,6 +42,9 @@ const state = {
   reconciliationTransactionFilter: "recommended",
   reconciliationFocusTransactionId: null,
   notesWorkspaceOpen: false,
+  notesWorkspaceFontSize: 1.08,
+  notesWorkspaceRuled: true,
+  notesWorkspaceFocus: false,
   activeView: "dashboard"
 };
 
@@ -1065,6 +1068,43 @@ function syncNotesWorkspacePreview(value) {
   }
 }
 
+function renderNotesWorkspaceControls() {
+  const shell = document.querySelector(".notes-workspace-shell");
+  const input = document.getElementById("notes-workspace-input");
+  const rulingButton = document.getElementById("toggle-notes-ruling");
+  const focusButton = document.getElementById("toggle-notes-focus");
+  const fontDownButton = document.getElementById("notes-font-down");
+  const fontUpButton = document.getElementById("notes-font-up");
+
+  if (!shell || !input) {
+    return;
+  }
+
+  const fontSize = Math.max(0.96, Math.min(1.32, Number(state.notesWorkspaceFontSize || 1.08)));
+  shell.classList.toggle("notes-ruled", Boolean(state.notesWorkspaceRuled));
+  shell.classList.toggle("notes-focus", Boolean(state.notesWorkspaceFocus));
+  shell.style.setProperty("--notes-font-size", `${fontSize.toFixed(2)}rem`);
+  shell.style.setProperty("--notes-line-height", fontSize >= 1.18 ? "1.78" : fontSize <= 1 ? "1.6" : "1.7");
+
+  if (rulingButton) {
+    rulingButton.classList.toggle("active", Boolean(state.notesWorkspaceRuled));
+    rulingButton.textContent = state.notesWorkspaceRuled ? "Linie on" : "Linie off";
+  }
+
+  if (focusButton) {
+    focusButton.classList.toggle("active", Boolean(state.notesWorkspaceFocus));
+    focusButton.textContent = state.notesWorkspaceFocus ? "Widok pelny" : "Czysty ekran";
+  }
+
+  if (fontDownButton) {
+    fontDownButton.disabled = fontSize <= 0.96;
+  }
+
+  if (fontUpButton) {
+    fontUpButton.disabled = fontSize >= 1.32;
+  }
+}
+
 function updateNotesWorkspaceMeta(visit = getSelectedVisit()) {
   const title = document.getElementById("notes-workspace-title");
   const meta = document.getElementById("notes-workspace-meta");
@@ -1093,6 +1133,7 @@ function setNotesWorkspaceVisibility(isVisible) {
     overlay.hidden = false;
     document.body.classList.add("workspace-open");
     state.notesWorkspaceOpen = true;
+    renderNotesWorkspaceControls();
     window.requestAnimationFrame(() => {
       workspaceInput.focus();
       const end = workspaceInput.value.length;
@@ -2354,6 +2395,10 @@ function attachActions() {
   const closeNotesWorkspaceButton = document.getElementById("close-notes-workspace");
   const notesWorkspaceInput = document.getElementById("notes-workspace-input");
   const notesWorkspaceOverlay = document.getElementById("notes-workspace-overlay");
+  const notesFontDownButton = document.getElementById("notes-font-down");
+  const notesFontUpButton = document.getElementById("notes-font-up");
+  const notesRulingButton = document.getElementById("toggle-notes-ruling");
+  const notesFocusButton = document.getElementById("toggle-notes-focus");
 
   if (notesPreview) {
     notesPreview.onpointerdown = (event) => {
@@ -2370,6 +2415,34 @@ function attachActions() {
 
   if (openNotesWorkspaceButton) {
     openNotesWorkspaceButton.onclick = () => setNotesWorkspaceVisibility(true);
+  }
+
+  if (notesFontDownButton) {
+    notesFontDownButton.onclick = () => {
+      state.notesWorkspaceFontSize = Math.max(0.96, Number((state.notesWorkspaceFontSize - 0.06).toFixed(2)));
+      renderNotesWorkspaceControls();
+    };
+  }
+
+  if (notesFontUpButton) {
+    notesFontUpButton.onclick = () => {
+      state.notesWorkspaceFontSize = Math.min(1.32, Number((state.notesWorkspaceFontSize + 0.06).toFixed(2)));
+      renderNotesWorkspaceControls();
+    };
+  }
+
+  if (notesRulingButton) {
+    notesRulingButton.onclick = () => {
+      state.notesWorkspaceRuled = !state.notesWorkspaceRuled;
+      renderNotesWorkspaceControls();
+    };
+  }
+
+  if (notesFocusButton) {
+    notesFocusButton.onclick = () => {
+      state.notesWorkspaceFocus = !state.notesWorkspaceFocus;
+      renderNotesWorkspaceControls();
+    };
   }
 
   if (closeNotesWorkspaceButton) {

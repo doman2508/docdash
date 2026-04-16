@@ -456,7 +456,11 @@
             <h3 id="notes-workspace-title">Notatki z sesji</h3>
             <p class="field-hint">Duzy obszar pod spokojne pisanie na tablecie. Tekst wraca od razu do tej wizyty.</p>
           </div>
-          <div class="inline-actions">
+          <div class="inline-actions notes-workspace-toolbar">
+            <button class="ghost" id="notes-font-down" type="button" aria-label="Zmniejsz tekst">A-</button>
+            <button class="ghost" id="notes-font-up" type="button" aria-label="Powieksz tekst">A+</button>
+            <button class="ghost" id="toggle-notes-ruling" type="button">Linie</button>
+            <button class="ghost" id="toggle-notes-focus" type="button">Czysty ekran</button>
             <button class="primary" id="close-notes-workspace" type="button">Gotowe</button>
           </div>
         </div>
@@ -467,6 +471,10 @@
           id="notes-workspace-input"
           class="notes-workspace-input"
           rows="18"
+          autocapitalize="sentences"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
           placeholder="Tu wpisuj notatki z sesji..."
         ></textarea>
       </div>
