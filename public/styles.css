@@ -1413,6 +1413,11 @@ p {
   margin-bottom: 12px;
 }
 
+.patient-status-copy {
+  margin: -2px 0 10px;
+  max-width: 52ch;
+}
+
 .patient-detail-panel .small-gap {
   margin-top: 4px;
   margin-bottom: 10px;

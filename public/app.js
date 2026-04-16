@@ -348,6 +348,7 @@ function getPatients() {
         .reduce((sum, visit) => sum + visit.payment.amount, 0);
       const pending = totalDue - totalPaid;
       const nextVisit = visits.find((visit) => visit.nextVisit.status === "scheduled");
+      const attention = getPatientAttentionMeta(pending, importedRows);
 
       return {
         patientName,
@@ -359,7 +360,9 @@ function getPatients() {
         totalPaid,
         pending,
         nextVisit,
-        activeStatus: pending > 0 || importedRows.some((row) => !row.processed) ? "wymaga uwagi" : "aktywny"
+        activeStatus: attention.label,
+        activeStatusTone: attention.tone,
+        activeStatusDetail: attention.detail
       };
     })
     .sort((left, right) => left.patientName.localeCompare(right.patientName));
@@ -368,6 +371,40 @@ function getPatients() {
 function getSelectedPatient() {
   const patients = getPatients();
   return patients.find((patient) => patient.patientName === state.selectedPatientName) || patients[0];
+}
+
+function getPatientAttentionMeta(pending, importedRows = []) {
+  const openImports = (importedRows || []).filter((row) => !row.processed).length;
+
+  if (pending > 0 && openImports > 0) {
+    return {
+      label: "Saldo i importy",
+      tone: "warning",
+      detail: `${openImports} wizyty z importu ZL czekaja na przejecie, a saldo pacjenta wynosi ${formatCurrency(pending)}.`
+    };
+  }
+
+  if (pending > 0) {
+    return {
+      label: "Saldo otwarte",
+      tone: "warning",
+      detail: `Pacjent ma otwarte saldo ${formatCurrency(pending)} do potwierdzenia lub rozliczenia.`
+    };
+  }
+
+  if (openImports > 0) {
+    return {
+      label: "Importy ZL",
+      tone: "warning",
+      detail: `${openImports} wizyty z importu ZL czekaja jeszcze na przejecie do workflow.`
+    };
+  }
+
+  return {
+    label: "Aktywny",
+    tone: "success",
+    detail: "Brak otwartych importow i brak zaleglosci rozliczeniowych."
+  };
 }
 
 function getFilteredPatients() {
@@ -774,6 +811,7 @@ function renderPatients() {
     document.getElementById("patient-heading").textContent = state.patientSearch ? "Brak wynikow" : "Brak pacjentow";
     document.getElementById("patient-badge").textContent = "pusto";
     document.getElementById("patient-badge").className = "badge neutral";
+    document.getElementById("patient-status-copy").textContent = "";
     document.getElementById("patient-list").innerHTML = `<div class="empty-state">Nie znaleziono pacjenta dla tego wyszukiwania.</div>`;
     document.getElementById("patient-summary-grid").innerHTML = "";
     document.getElementById("patient-history").innerHTML = "";
@@ -782,7 +820,9 @@ function renderPatients() {
 
   document.getElementById("patient-heading").textContent = selectedPatient.patientName;
   document.getElementById("patient-badge").textContent = selectedPatient.activeStatus;
-  document.getElementById("patient-badge").className = `badge ${selectedPatient.pending > 0 ? "warning" : "success"}`;
+  document.getElementById("patient-badge").className = `badge ${selectedPatient.activeStatusTone || "neutral"}`;
+  document.getElementById("patient-badge").title = selectedPatient.activeStatusDetail || "";
+  document.getElementById("patient-status-copy").textContent = selectedPatient.activeStatusDetail || "";
 
   document.getElementById("patient-list").innerHTML = filteredPatients
     .map((patient) => {
@@ -792,7 +832,7 @@ function renderPatients() {
             <h4>${patient.patientName}</h4>
             <span>${patient.visitCount} wizyt - ZL: ${patient.importedCount} - saldo: ${formatCurrency(patient.pending)}</span>
           </div>
-          <span class="badge ${patient.pending > 0 ? "warning" : "success"}">${patient.activeStatus}</span>
+          <span class="badge ${patient.activeStatusTone || "neutral"}" title="${patient.activeStatusDetail || ""}">${patient.activeStatus}</span>
         </article>
       `;
     })
@@ -820,15 +860,24 @@ function renderPatients() {
   const historyItems = [
     ...selectedPatient.visits.map((visit) => ({
       type: "visit",
-      sortKey: `1-${visit.dateLabel}-${visit.time}`,
       data: visit
     })),
     ...selectedPatient.importedRows.map((row) => ({
       type: "import",
-      sortKey: `0-${row.dateLabel}`,
       data: row
     }))
-  ];
+  ].sort((left, right) => {
+    const byDate = compareSessionDateTimeDesc(left.data, right.data);
+    if (byDate !== 0) {
+      return byDate;
+    }
+
+    if (left.type !== right.type) {
+      return left.type === "visit" ? -1 : 1;
+    }
+
+    return 0;
+  });
 
   document.getElementById("patient-history").innerHTML = historyItems
     .map((item) => {
@@ -2582,7 +2631,6 @@ function attachActions() {
   if (closeNotesWorkspaceButton) {
     closeNotesWorkspaceButton.onclick = () => {
       setNotesWorkspaceVisibility(false);
-      setSaveStatus("Notatki z trybu pisania sa juz w tej sesji. Zapisz karte, gdy skonczysz.", "idle");
     };
   }
 
