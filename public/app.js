@@ -534,6 +534,87 @@ function getImportRowPaymentMeta(row) {
   };
 }
 
+function defaultVisitPaymentStatusLabel(status) {
+  if (status === "paid") {
+    return "oplacone";
+  }
+
+  if (status === "partial") {
+    return "platnosc czesciowa";
+  }
+
+  if (status === "ignored") {
+    return "pominieta";
+  }
+
+  return "platnosc oczekuje";
+}
+
+function getVisitPaymentMeta(visit, overrides = {}) {
+  if (!visit) {
+    return {
+      settled: false,
+      ignored: false,
+      blockedByOutcome: false,
+      label: "platnosc oczekuje",
+      tone: "warning"
+    };
+  }
+
+  const outcomeMeta = getSessionOutcomeMeta(overrides.outcome || visit.sessionOutcome, visit.dateLabel);
+  const paymentStatus = overrides.paymentStatus || visit.payment?.status || "pending";
+  const usesStoredStatus = paymentStatus === visit.payment?.status;
+  const storedLabel = usesStoredStatus ? String(visit.payment?.statusLabel || "").trim() : "";
+
+  if (!outcomeMeta.chargeable) {
+    return {
+      settled: true,
+      ignored: true,
+      blockedByOutcome: true,
+      label: "bez naleznosci",
+      tone: "neutral"
+    };
+  }
+
+  if (paymentStatus === "ignored") {
+    return {
+      settled: true,
+      ignored: true,
+      blockedByOutcome: false,
+      label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
+      tone: "neutral"
+    };
+  }
+
+  if (paymentStatus === "paid") {
+    return {
+      settled: true,
+      ignored: false,
+      blockedByOutcome: false,
+      label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
+      tone: "success"
+    };
+  }
+
+  if (paymentStatus === "partial") {
+    return {
+      settled: false,
+      ignored: false,
+      blockedByOutcome: false,
+      label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
+      tone: "neutral"
+    };
+  }
+
+  return {
+    settled: false,
+    ignored: false,
+    blockedByOutcome: false,
+    label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
+    tone: "warning"
+  };
+}
+
 function isImportRowSettled(row) {
   return getImportRowPaymentMeta(row).settled;
 }
@@ -683,6 +764,12 @@ function setChoiceState(group, value) {
   });
 }
 
+function clearChoiceState(group) {
+  document.querySelectorAll(`[data-choice-group="${group}"]`).forEach((button) => {
+    button.classList.remove("active");
+  });
+}
+
 function getTodayMetrics() {
   const workflowToday = getActiveDateWorkflowVisits();
   const importedToday = getActiveDateImportRows();
@@ -777,6 +864,7 @@ function renderDashboard() {
           .map((item) => {
             if (item.type === "workflow") {
               const visit = item.visit;
+              const paymentMeta = getVisitPaymentMeta(visit);
               return `
                 <article class="day-entry workflow-entry day-list-row" data-day-open-visit="${visit.id}">
                   <div>
@@ -785,7 +873,7 @@ function renderDashboard() {
                   </div>
                   <span class="day-entry-time">${visit.time || "bez godziny"}</span>
                   <span class="tag">${visit.status === "closed" ? "zamknieta" : "w workflow"}</span>
-                  <span class="tag">${visit.payment.statusLabel}</span>
+                  <span class="tag">${paymentMeta.label}</span>
                   <button class="ghost" type="button">Sesja</button>
                 </article>
               `;
@@ -1049,6 +1137,7 @@ function renderPatients() {
       if (item.type === "visit") {
         const visit = item.data;
         const outcomeMeta = getSessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel);
+        const paymentMeta = getVisitPaymentMeta(visit);
         return `
           <article class="history-item">
             <div>
@@ -1057,7 +1146,7 @@ function renderPatients() {
             </div>
             <div class="inbox-actions">
               <span class="badge ${sessionOutcomeBadgeTone(visit.sessionOutcome, visit.dateLabel)}">${outcomeMeta.label}</span>
-              <span class="badge ${visit.payment.status === "paid" ? "success" : "warning"}">${visit.payment.statusLabel}</span>
+              <span class="badge ${paymentMeta.tone}">${paymentMeta.label}</span>
               <button class="ghost history-open" type="button" data-history-visit="${visit.id}">Otworz wizyte</button>
             </div>
           </article>
@@ -1234,8 +1323,6 @@ function renderImports() {
 function renderBilling() {
   const visit = getSelectedVisit();
   const monthly = getMonthlyStats();
-  const paymentBadge = document.getElementById("visit-payment-badge");
-  const paymentContext = document.getElementById("visit-billing-context");
   const openPayments = state.data.visits
     .filter((entry) => isVisitChargeable(entry))
     .filter((entry) => entry.payment.status !== "paid")
@@ -1245,17 +1332,7 @@ function renderBilling() {
   setChoiceState("payment-status", visit.payment.status);
   setChoiceState("payment-method", visit.payment.method);
   setChoiceState("payment-document", visit.payment.documentType);
-
-  if (paymentBadge) {
-    paymentBadge.textContent = visit.payment.statusLabel;
-    paymentBadge.className = `badge ${
-      visit.payment.status === "paid" ? "success" : visit.payment.status === "partial" ? "neutral" : "warning"
-    }`;
-  }
-
-  if (paymentContext) {
-    paymentContext.textContent = `${visit.patientName} | ${visit.dateLabel} ${visit.time} | ${visit.payment.statusLabel}`;
-  }
+  updateVisitBillingPresentation();
 
   document.getElementById("payment-list").innerHTML = openPayments.length
     ? openPayments.map((entry) => {
@@ -1280,6 +1357,70 @@ function renderBilling() {
 
   renderVisitCloseoutPreview();
   renderReconciliation();
+}
+
+function updateVisitBillingPresentation() {
+  const visit = getSelectedVisit();
+  const paymentBadge = document.getElementById("visit-payment-badge");
+  const paymentContext = document.getElementById("visit-billing-context");
+  const amountField = document.getElementById("billing-amount");
+  const markPaidButton = document.getElementById("mark-paid");
+  const issueDocumentButton = document.getElementById("issue-document");
+  const selectedOutcome =
+    document.querySelector('[data-choice-group="session-outcome"].active')?.dataset.choiceValue || visit.sessionOutcome;
+  const selectedPaymentStatus =
+    document.querySelector('[data-choice-group="payment-status"].active')?.dataset.choiceValue || visit.payment.status;
+  const outcomeMeta = getSessionOutcomeMeta(selectedOutcome, visit.dateLabel);
+  const paymentMeta = getVisitPaymentMeta(visit, { outcome: selectedOutcome, paymentStatus: selectedPaymentStatus });
+
+  if (paymentMeta.blockedByOutcome) {
+    clearChoiceState("payment-status");
+    clearChoiceState("payment-method");
+    clearChoiceState("payment-document");
+  } else {
+    if (!document.querySelector('[data-choice-group="payment-status"].active')) {
+      setChoiceState("payment-status", visit.payment.status);
+    }
+    if (!document.querySelector('[data-choice-group="payment-method"].active')) {
+      setChoiceState("payment-method", visit.payment.method);
+    }
+    if (!document.querySelector('[data-choice-group="payment-document"].active')) {
+      setChoiceState("payment-document", visit.payment.documentType);
+    }
+  }
+
+  ["payment-status", "payment-method", "payment-document"].forEach((group) => {
+    document.querySelectorAll(`[data-choice-group="${group}"]`).forEach((button) => {
+      button.disabled = paymentMeta.blockedByOutcome;
+      button.title = paymentMeta.blockedByOutcome ? "Ta sesja nie buduje naleznosci." : "";
+    });
+  });
+
+  if (amountField) {
+    amountField.disabled = paymentMeta.blockedByOutcome;
+    amountField.title = paymentMeta.blockedByOutcome ? "Kwota nie wymaga rozliczenia dla tej sesji." : "";
+  }
+
+  if (markPaidButton) {
+    markPaidButton.disabled = paymentMeta.blockedByOutcome;
+    markPaidButton.title = paymentMeta.blockedByOutcome ? "Ta sesja nie wymaga rozliczenia." : "";
+  }
+
+  if (issueDocumentButton) {
+    issueDocumentButton.disabled = paymentMeta.blockedByOutcome;
+    issueDocumentButton.title = paymentMeta.blockedByOutcome ? "Dokument nie jest potrzebny dla tej sesji." : "";
+  }
+
+  if (paymentBadge) {
+    paymentBadge.textContent = paymentMeta.label;
+    paymentBadge.className = `badge ${paymentMeta.tone}`;
+  }
+
+  if (paymentContext) {
+    paymentContext.textContent = paymentMeta.blockedByOutcome
+      ? `${visit.patientName} | ${visit.dateLabel} ${visit.time} | bez naleznosci, bo sesja jest oznaczona jako ${outcomeMeta.label}`
+      : `${visit.patientName} | ${visit.dateLabel} ${visit.time} | ${paymentMeta.label}`;
+  }
 }
 
 function syncNotesWorkspacePreview(value) {
@@ -2626,8 +2767,12 @@ function collectVisitPatch() {
 
 function collectBillingPatch() {
   const visit = getSelectedVisit();
-  const status = document.querySelector('[data-choice-group="payment-status"].active').dataset.choiceValue;
-  const documentType = document.querySelector('[data-choice-group="payment-document"].active').dataset.choiceValue;
+  const status =
+    document.querySelector('[data-choice-group="payment-status"].active')?.dataset.choiceValue || visit.payment.status || "pending";
+  const documentType =
+    document.querySelector('[data-choice-group="payment-document"].active')?.dataset.choiceValue
+    || visit.payment.documentType
+    || "none";
   const documentIssued = documentType === "none"
     ? false
     : visit.payment.documentType === documentType
@@ -2639,8 +2784,9 @@ function collectBillingPatch() {
       ...visit.payment,
       amount: Number(document.getElementById("billing-amount").value || visit.payment.amount),
       status,
-      statusLabel: status === "paid" ? "oplacone" : status === "partial" ? "platnosc czesciowa" : "platnosc oczekuje",
-      method: document.querySelector('[data-choice-group="payment-method"].active').dataset.choiceValue,
+      statusLabel: defaultVisitPaymentStatusLabel(status),
+      method:
+        document.querySelector('[data-choice-group="payment-method"].active')?.dataset.choiceValue || visit.payment.method || "transfer",
       documentType,
       documentIssued
     }
@@ -2782,6 +2928,9 @@ function attachActions() {
       }
       if (["session-outcome", "next-status", "payment-status", "payment-method", "payment-document"].includes(button.dataset.choiceGroup)) {
         renderVisitCloseoutPreview();
+      }
+      if (["session-outcome", "payment-status", "payment-method", "payment-document"].includes(button.dataset.choiceGroup)) {
+        updateVisitBillingPresentation();
       }
     };
   });
