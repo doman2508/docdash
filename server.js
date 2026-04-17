@@ -247,6 +247,81 @@ function normalizeDateLabel(label) {
   return String(label).trim();
 }
 
+function importRowIdentityKey(row) {
+  if (!row) {
+    return "";
+  }
+
+  return [
+    normalizeDateLabel(row.dateLabel),
+    String(row.time || "").trim(),
+    normalizeSearchValue(row.patientName),
+    Number(row.amount || 0)
+  ].join("|");
+}
+
+function mergeImportRowState(preferred, duplicate) {
+  return {
+    ...preferred,
+    processed: preferred.processed || duplicate.processed,
+    linkedVisitId: preferred.linkedVisitId || duplicate.linkedVisitId,
+    processedAt: preferred.processedAt || duplicate.processedAt,
+    sessionOutcome: preferred.sessionOutcome || duplicate.sessionOutcome,
+    sessionOutcomeUpdatedAt: preferred.sessionOutcomeUpdatedAt || duplicate.sessionOutcomeUpdatedAt,
+    paymentConfirmed: preferred.paymentConfirmed || duplicate.paymentConfirmed,
+    bankTransactionId: preferred.bankTransactionId || duplicate.bankTransactionId,
+    bankPaidAt: preferred.bankPaidAt || duplicate.bankPaidAt,
+    paymentMatchId: preferred.paymentMatchId || duplicate.paymentMatchId,
+    externalPaymentMethod: preferred.externalPaymentMethod || duplicate.externalPaymentMethod,
+    externalPaidAt: preferred.externalPaidAt || duplicate.externalPaidAt,
+    paymentIgnored: preferred.paymentIgnored || duplicate.paymentIgnored,
+    paymentIgnoredAt: preferred.paymentIgnoredAt || duplicate.paymentIgnoredAt,
+    paymentStatus: preferred.paymentStatus || duplicate.paymentStatus,
+    source: preferred.source || duplicate.source
+  };
+}
+
+function cleanupDuplicateImportRows(store) {
+  if (!Array.isArray(store.imports) || !store.imports.length) {
+    return 0;
+  }
+
+  const keptRows = new Map();
+  let removed = 0;
+
+  store.imports = store.imports
+    .map((batch) => {
+      const nextRows = [];
+
+      (batch.rows || []).forEach((row) => {
+        const key = importRowIdentityKey(row);
+        if (!key) {
+          nextRows.push(row);
+          return;
+        }
+
+        const existing = keptRows.get(key);
+        if (!existing) {
+          keptRows.set(key, row);
+          nextRows.push(row);
+          return;
+        }
+
+        Object.assign(existing, mergeImportRowState(existing, row));
+        removed += 1;
+      });
+
+      return {
+        ...batch,
+        rowCount: nextRows.length,
+        rows: nextRows
+      };
+    })
+    .filter((batch) => (batch.rows || []).length);
+
+  return removed;
+}
+
 function parseDateValue(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value;
@@ -720,33 +795,27 @@ function mergeZlBatch(store, batch) {
       if (row.legacyId) {
         existingRows.set(row.legacyId, row);
       }
+      const identityKey = importRowIdentityKey(row);
+      if (identityKey) {
+        existingRows.set(identityKey, row);
+      }
     });
   });
 
   batch.rows = batch.rows.map((row) => {
-    const existing = existingRows.get(row.id) || existingRows.get(row.legacyId);
+    const existing =
+      existingRows.get(row.id)
+      || existingRows.get(row.legacyId)
+      || existingRows.get(importRowIdentityKey(row));
     if (!existing) {
       return row;
     }
 
-    return {
-      ...row,
-      processed: existing.processed || row.processed,
-      linkedVisitId: existing.linkedVisitId || row.linkedVisitId,
-      processedAt: existing.processedAt || row.processedAt,
-      sessionOutcome: existing.sessionOutcome || row.sessionOutcome,
-      paymentConfirmed: existing.paymentConfirmed || row.paymentConfirmed,
-      bankTransactionId: existing.bankTransactionId || row.bankTransactionId,
-      bankPaidAt: existing.bankPaidAt || row.bankPaidAt,
-      paymentMatchId: existing.paymentMatchId || row.paymentMatchId,
-      externalPaymentMethod: existing.externalPaymentMethod || row.externalPaymentMethod,
-      externalPaidAt: existing.externalPaidAt || row.externalPaidAt,
-      paymentIgnored: existing.paymentIgnored || row.paymentIgnored,
-      paymentIgnoredAt: existing.paymentIgnoredAt || row.paymentIgnoredAt
-    };
+    return mergeImportRowState(row, existing);
   });
 
   store.imports = [batch, ...store.imports.filter((existingBatch) => existingBatch.id !== batch.id)];
+  cleanupDuplicateImportRows(store);
   return batch;
 }
 
@@ -2333,7 +2402,12 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === "/api/bootstrap" && req.method === "GET") {
     const data = readData();
+    const cleaned = cleanupDuplicateImportRows(data);
     rebuildPaymentMatches(data);
+    if (cleaned) {
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      writeData(data);
+    }
     sendJson(res, 200, data);
     return;
   }
