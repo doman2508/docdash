@@ -46,6 +46,7 @@ const state = {
   notesWorkspaceFontSize: 1.08,
   notesWorkspaceRuled: true,
   notesWorkspaceFocus: false,
+  visitAutosaveInFlight: false,
   activeView: "dashboard"
 };
 
@@ -832,10 +833,8 @@ function renderDashboard() {
   }
 
   document.querySelectorAll("[data-day-open-visit]").forEach((item) => {
-    item.onclick = () => {
-      state.selectedVisitId = item.dataset.dayOpenVisit;
-      renderAll();
-      setActiveView("visit");
+    item.onclick = async () => {
+      await openVisitById(item.dataset.dayOpenVisit);
     };
   });
 
@@ -2122,7 +2121,7 @@ async function saveVisit(patch, message) {
 
   if (!response.ok) {
     setSaveStatus("Nie udalo sie zapisac zmian.", "error");
-    return;
+    return false;
   }
 
   const updatedVisit = await response.json();
@@ -2132,6 +2131,7 @@ async function saveVisit(patch, message) {
   state.selectedPatientName = updatedVisit.patientName;
   setSaveStatus(message, "success");
   renderAll();
+  return true;
 }
 
 async function promoteImportRow(importId, rowId) {
@@ -2701,6 +2701,78 @@ function buildVisitSavePayload(options = {}) {
   };
 }
 
+function hasVisitEditorChanges(visit, visitPatch, payment) {
+  if (!visit) {
+    return false;
+  }
+
+  return (
+    visit.sessionOutcome !== visitPatch.sessionOutcome ||
+    String(visit.notes || "") !== String(visitPatch.notes || "") ||
+    String(visit.summary || "") !== String(visitPatch.summary || "") ||
+    visit.nextVisit.status !== visitPatch.nextVisit.status ||
+    String(visit.nextVisit.plannedLabel || "") !== String(visitPatch.nextVisit.plannedLabel || "") ||
+    String(visit.nextVisit.note || "") !== String(visitPatch.nextVisit.note || "") ||
+    Number(visit.payment.amount || 0) !== Number(payment.amount || 0) ||
+    visit.payment.status !== payment.status ||
+    visit.payment.method !== payment.method ||
+    visit.payment.documentType !== payment.documentType
+  );
+}
+
+async function autosaveVisitIfNeeded(message = "Zmiany zapisane automatycznie przy opuszczeniu sesji.") {
+  if (state.activeView !== "visit" || state.visitAutosaveInFlight) {
+    return true;
+  }
+
+  const notesField = document.getElementById("visit-notes");
+  if (!notesField || !state.selectedVisitId) {
+    return true;
+  }
+
+  const { visit, visitPatch, paymentPatch, payload } = buildVisitSavePayload();
+  if (!hasVisitEditorChanges(visit, visitPatch, paymentPatch.payment)) {
+    return true;
+  }
+
+  state.visitAutosaveInFlight = true;
+
+  try {
+    return await saveVisit(payload, message);
+  } finally {
+    state.visitAutosaveInFlight = false;
+  }
+}
+
+async function openVisitById(visitId) {
+  if (!visitId) {
+    return;
+  }
+
+  const canContinue = await autosaveVisitIfNeeded("Zmiany zapisane automatycznie przed otwarciem innej wizyty.");
+  if (!canContinue) {
+    return;
+  }
+
+  const visit = state.data.visits.find((entry) => entry.id === visitId);
+  state.selectedVisitId = visitId;
+  state.selectedPatientName = visit?.patientName || state.selectedPatientName;
+  renderAll();
+  setActiveView("visit");
+}
+
+async function navigateToView(viewKey) {
+  if (viewKey !== "visit") {
+    const canContinue = await autosaveVisitIfNeeded();
+    if (!canContinue) {
+      return false;
+    }
+  }
+
+  setActiveView(viewKey);
+  return true;
+}
+
 function attachActions() {
   document.querySelectorAll("[data-choice-group]").forEach((button) => {
     button.onclick = () => {
@@ -2778,9 +2850,11 @@ function attachActions() {
     );
   };
 
-  document.getElementById("open-validation").onclick = () => {
-    setActiveView("billing");
-    setSaveStatus("Przeszedles do walidacji platnosci dla calej praktyki.", "idle");
+  document.getElementById("open-validation").onclick = async () => {
+    const navigated = await navigateToView("billing");
+    if (navigated) {
+      setSaveStatus("Przeszedles do walidacji platnosci dla calej praktyki.", "idle");
+    }
   };
 
   const notesPreview = document.getElementById("visit-notes");
@@ -2891,10 +2965,8 @@ function attachActions() {
   });
 
   document.querySelectorAll("[data-visit-jump]").forEach((button) => {
-    button.onclick = () => {
-      state.selectedVisitId = button.dataset.visitJump;
-      renderAll();
-      setActiveView("visit");
+    button.onclick = async () => {
+      await openVisitById(button.dataset.visitJump);
     };
   });
 
@@ -2962,10 +3034,8 @@ function attachActions() {
   });
 
   document.querySelectorAll("[data-history-visit]").forEach((button) => {
-    button.onclick = () => {
-      state.selectedVisitId = button.dataset.historyVisit;
-      renderAll();
-      setActiveView("visit");
+    button.onclick = async () => {
+      await openVisitById(button.dataset.historyVisit);
     };
   });
 
@@ -3117,7 +3187,9 @@ async function bootstrap() {
 }
 
 navButtons.forEach((button) => {
-  button.addEventListener("click", () => setActiveView(button.dataset.view));
+  button.addEventListener("click", async () => {
+    await navigateToView(button.dataset.view);
+  });
 });
 
 document.getElementById("open-data-tools")?.addEventListener("click", () => {
@@ -3149,6 +3221,10 @@ document.getElementById("patient-search")?.addEventListener("input", (event) => 
 });
 
 logoutButton?.addEventListener("click", async () => {
+  const canContinue = await autosaveVisitIfNeeded("Zmiany zapisane automatycznie przed wylogowaniem.");
+  if (!canContinue) {
+    return;
+  }
   await fetch("/api/logout", { method: "POST" });
   window.location.href = "/login.html";
 });
