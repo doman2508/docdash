@@ -470,7 +470,12 @@ function getConfirmedImportRowMatch(row) {
   return lookup.byTargetId.get(targetId) || lookup.bySessionKey.get(sessionIdentityKey(row)) || null;
 }
 
+function getImportRowOutcomeMeta(row) {
+  return getSessionOutcomeMeta(row?.sessionOutcome, row?.dateLabel);
+}
+
 function getImportRowPaymentMeta(row) {
+  const outcomeMeta = getImportRowOutcomeMeta(row);
   const confirmedMatch = getConfirmedImportRowMatch(row);
   const externalMeta = getExternalPaymentMeta(row?.externalPaymentMethod);
   const matchedExternalMeta = getExternalPaymentMeta(confirmedMatch?.externalPayment?.method);
@@ -482,6 +487,16 @@ function getImportRowPaymentMeta(row) {
     row?.externalPaymentMethod ||
     row?.paymentIgnored
   );
+
+  if (!outcomeMeta.chargeable) {
+    return {
+      settled: true,
+      ignored: true,
+      label: "bez naleznosci",
+      tone: "neutral",
+      match: confirmedMatch
+    };
+  }
 
   if (ignored) {
     return {
@@ -527,7 +542,7 @@ function needsImportWorkflowCard(row) {
 }
 
 function importRowNeedsAttention(row) {
-  return needsImportWorkflowCard(row) && !isImportRowSettled(row);
+  return needsImportWorkflowCard(row) && getImportRowOutcomeMeta(row).chargeable && !isImportRowSettled(row);
 }
 
 function getPatientAttentionMeta(pending, importedRows = []) {
@@ -1052,23 +1067,35 @@ function renderPatients() {
             </div>
           </article>
         `;
-      }
+        }
 
-      const row = item.data;
-      const paymentMeta = getImportRowPaymentMeta(row);
-      const targetId = importRowTargetId(row);
-      return `
-        <article class="history-item">
-          <div>
-            <h4>${row.dateLabel}${row.time ? ` - ${row.time}` : ""} - ZL</h4>
-            <span>${row.serviceName} - ${row.bookingStatus} - ${formatCurrency(row.amount)}</span>
-          </div>
-          <div class="inbox-actions">
-            <span class="badge neutral">ZL</span>
-            <span class="badge ${paymentMeta.tone}">${paymentMeta.label}</span>
-            ${importRowNeedsAttention(row) && targetId ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(selectedPatient.patientName)}" data-target-id="${targetId}" data-transaction-id="">Rozliczenie</button>` : ""}
-            <button class="${importRowNeedsAttention(row) ? "secondary" : "ghost"} promote-import" type="button" data-import-id="${row.importId}" data-row-id="${row.id}">Utworz karte sesji</button>
-          </div>
+        const row = item.data;
+        const outcomeMeta = getImportRowOutcomeMeta(row);
+        const paymentMeta = getImportRowPaymentMeta(row);
+        const targetId = importRowTargetId(row);
+        const bookingCopy = [row.serviceName, row.bookingStatus, formatCurrency(row.amount)].filter(Boolean).join(" - ");
+        const outcomeCopy =
+          outcomeMeta.key === "cancelled"
+            ? "Sesja oznaczona jako nieodbyta."
+            : outcomeMeta.key === "rescheduled"
+              ? "Sesja oznaczona jako przeniesiona."
+              : outcomeMeta.key === "no_show_paid"
+                ? "Sesja oznaczona jako no-show platny."
+                : "";
+        return `
+          <article class="history-item">
+            <div>
+              <h4>${row.dateLabel}${row.time ? ` - ${row.time}` : ""} - ZL</h4>
+              <span>${bookingCopy}</span>
+              ${outcomeCopy ? `<span>${outcomeCopy}</span>` : ""}
+            </div>
+            <div class="inbox-actions">
+              <span class="badge neutral">ZL</span>
+              <span class="badge ${sessionOutcomeBadgeTone(row.sessionOutcome, row.dateLabel)}">${outcomeMeta.label}</span>
+              <span class="badge ${paymentMeta.tone}">${paymentMeta.label}</span>
+              ${importRowNeedsAttention(row) && targetId ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(selectedPatient.patientName)}" data-target-id="${targetId}" data-transaction-id="">Rozliczenie</button>` : ""}
+              <button class="${importRowNeedsAttention(row) ? "secondary" : "ghost"} promote-import" type="button" data-import-id="${row.importId}" data-row-id="${row.id}">Utworz karte sesji</button>
+            </div>
         </article>
       `;
     })
