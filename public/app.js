@@ -224,6 +224,20 @@ function parseDateLabel(label) {
   return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
 }
 
+function formatDateKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return getCurrentDateKey();
+  }
+
+  return `${date.getDate()}.${String(date.getMonth() + 1).padStart(2, "0")}.${date.getFullYear()}`;
+}
+
+function shiftDateKey(label, deltaDays) {
+  const parsed = parseDateLabel(label) || parseDateLabel(getCurrentDateKey()) || new Date();
+  parsed.setDate(parsed.getDate() + Number(deltaDays || 0));
+  return formatDateKey(parsed);
+}
+
 function dateDistanceBetween(left, right) {
   const leftDate = parseDateLabel(left);
   const rightDate = parseDateLabel(right);
@@ -856,11 +870,19 @@ function renderDashboard() {
   const importedPendingLabel = importedPendingCount
     ? `${importedPendingCount} z ZL czeka na przejecie`
     : "brak wpisow ZL do przejecia";
+  const isToday = normalizeDateKey(workingDayLabel) === normalizeDateKey(getCurrentDateKey());
 
   document.getElementById("day-context").innerHTML = `
     <div class="day-context-copy">
       <p class="panel-label">Aktywny dzien workflow</p>
-      <h3>${workingDayLabel}</h3>
+      <div class="day-context-heading">
+        <h3>${workingDayLabel}</h3>
+        <div class="day-nav">
+          <button class="ghost day-nav-button" id="day-prev" type="button" aria-label="Poprzedni dzien">‹</button>
+          <button class="ghost day-nav-button" id="day-today" type="button"${isToday ? " disabled" : ""}>Dzis</button>
+          <button class="ghost day-nav-button" id="day-next" type="button" aria-label="Nastepny dzien">›</button>
+        </div>
+      </div>
       <p>${
         importedPendingCount
           ? `Masz ${importedPendingCount} wpis${importedPendingCount === 1 ? "" : importedPendingCount < 5 ? "y" : "ow"} z ZL na ten dzien. Jednym ruchem przenosisz je do sesji DocDash i dalej pracujesz juz tylko u nas.`
@@ -978,6 +1000,21 @@ function renderDashboard() {
 
   document.getElementById("promote-active-day")?.addEventListener("click", async () => {
     await promoteActiveDayToWorkflow();
+  });
+
+  document.getElementById("day-prev")?.addEventListener("click", () => {
+    state.activeDateKey = shiftDateKey(state.activeDateKey, -1);
+    renderAll();
+  });
+
+  document.getElementById("day-next")?.addEventListener("click", () => {
+    state.activeDateKey = shiftDateKey(state.activeDateKey, 1);
+    renderAll();
+  });
+
+  document.getElementById("day-today")?.addEventListener("click", () => {
+    state.activeDateKey = getCurrentDateKey();
+    renderAll();
   });
 }
 
@@ -2349,6 +2386,7 @@ async function promoteImportRow(importId, rowId) {
   }
 
   await refreshBootstrapData();
+  state.activeDateKey = normalizeDateKey(updatedRow.dateLabel) || state.activeDateKey;
   state.selectedImportId = importId;
   state.selectedPatientName = updatedRow.patientName || state.selectedPatientName;
   state.selectedVisitId = updatedRow.linkedVisitId || state.selectedVisitId;
