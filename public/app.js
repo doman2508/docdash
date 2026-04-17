@@ -298,6 +298,21 @@ function compareTransactionHistoryDesc(left, right) {
   return String(left?.counterparty || "").localeCompare(String(right?.counterparty || ""));
 }
 
+function compareDayPlanItems(left, right) {
+  const leftTime = getTimeSortValue(left?.visit?.time || left?.row?.time);
+  const rightTime = getTimeSortValue(right?.visit?.time || right?.row?.time);
+
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  if (left.statusRank !== right.statusRank) {
+    return left.statusRank - right.statusRank;
+  }
+
+  return String(left.patientName || "").localeCompare(String(right.patientName || ""));
+}
+
 function sessionIdentityKey(session) {
   if (!session) {
     return "";
@@ -718,26 +733,20 @@ function renderDashboard() {
     </div>
   `;
 
-  const dayItems = [
-    ...todayVisits.map((visit) => ({
-      type: "workflow",
-      statusRank: visit.status === "closed" ? 3 : 1,
+    const dayItems = [
+      ...todayVisits.map((visit) => ({
+        type: "workflow",
+        statusRank: visit.status === "closed" ? 3 : 1,
       patientName: visit.patientName,
       visit
     })),
     ...dayImportRows.map((row) => ({
       type: "import",
-      statusRank: 0,
-      patientName: row.patientName,
-      row
-    }))
-  ].sort((left, right) => {
-    if (left.statusRank !== right.statusRank) {
-      return left.statusRank - right.statusRank;
-    }
-
-    return left.patientName.localeCompare(right.patientName);
-  });
+        statusRank: 0,
+        patientName: row.patientName,
+        row
+      }))
+    ].sort(compareDayPlanItems);
 
   document.getElementById("day-schedule").innerHTML = dayItems.length
     ? `
