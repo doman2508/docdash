@@ -586,8 +586,10 @@ function getSelectedImport() {
 }
 
 function setSaveStatus(message, type = "idle") {
-  saveStatusEl.textContent = message;
+  const text = String(message || "").trim();
+  saveStatusEl.textContent = text;
   saveStatusEl.dataset.state = type;
+  saveStatusEl.hidden = !text;
 }
 
 function setReconciliationImportStatus(message, type = "idle") {
@@ -2184,7 +2186,7 @@ async function openPatientReconciliation(patientName, focusSessionId = null, foc
   state.reconciliationFocusTransactionId = focusTransactionId || null;
   renderAll();
   setActiveView("billing");
-  setSaveStatus(`Rozliczenie pacjenta: ${ledger.patientName}`, "success");
+  setSaveStatus("", "idle");
 }
 
 async function refreshOpenPatientReconciliation() {
