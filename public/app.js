@@ -1147,7 +1147,7 @@ function renderPatients() {
             <div class="inbox-actions">
               <span class="badge ${sessionOutcomeBadgeTone(visit.sessionOutcome, visit.dateLabel)}">${outcomeMeta.label}</span>
               <span class="badge ${paymentMeta.tone}">${paymentMeta.label}</span>
-              <button class="ghost history-open" type="button" data-history-visit="${visit.id}">Otworz wizyte</button>
+              <button class="ghost history-open" type="button" data-history-visit="${visit.id}">Otworz sesje</button>
             </div>
           </article>
         `;
@@ -1157,6 +1157,7 @@ function renderPatients() {
         const outcomeMeta = getImportRowOutcomeMeta(row);
         const paymentMeta = getImportRowPaymentMeta(row);
         const targetId = importRowTargetId(row);
+        const needsAttention = importRowNeedsAttention(row);
         const bookingCopy = [row.serviceName, row.bookingStatus, formatCurrency(row.amount)].filter(Boolean).join(" - ");
         const outcomeCopy =
           outcomeMeta.key === "cancelled"
@@ -1166,19 +1167,23 @@ function renderPatients() {
               : outcomeMeta.key === "no_show_paid"
                 ? "Sesja oznaczona jako no-show platny."
                 : "";
+        const workflowCopy = needsAttention
+          ? "To nadal tylko wpis z ZL. Jesli chcesz notatki i workflow, przejmij go do sesji."
+          : "To nadal tylko wpis z ZL. Dodanie karty sesji w DocDash jest opcjonalne.";
         return `
           <article class="history-item">
             <div>
               <h4>${row.dateLabel}${row.time ? ` - ${row.time}` : ""} - ZL</h4>
               <span>${bookingCopy}</span>
               ${outcomeCopy ? `<span>${outcomeCopy}</span>` : ""}
+              <span>${workflowCopy}</span>
             </div>
             <div class="inbox-actions">
               <span class="badge neutral">ZL</span>
               <span class="badge ${sessionOutcomeBadgeTone(row.sessionOutcome, row.dateLabel)}">${outcomeMeta.label}</span>
               <span class="badge ${paymentMeta.tone}">${paymentMeta.label}</span>
-              ${importRowNeedsAttention(row) && targetId ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(selectedPatient.patientName)}" data-target-id="${targetId}" data-transaction-id="">Rozliczenie</button>` : ""}
-              <button class="${importRowNeedsAttention(row) ? "secondary" : "ghost"} promote-import" type="button" data-import-id="${row.importId}" data-row-id="${row.id}">Utworz karte sesji</button>
+              ${needsAttention && targetId ? `<button class="ghost open-patient-reconciliation" type="button" data-patient-name="${encodeURIComponent(selectedPatient.patientName)}" data-target-id="${targetId}" data-transaction-id="">Waliduj platnosc</button>` : ""}
+              <button class="${needsAttention ? "secondary" : "ghost"} promote-import" type="button" data-import-id="${row.importId}" data-row-id="${row.id}">${needsAttention ? "Przejmij do sesji" : "Dodaj karte sesji"}</button>
             </div>
         </article>
       `;
@@ -1293,9 +1298,9 @@ function renderImports() {
             <span class="badge ${row.processed ? "success" : "warning"}">${row.processed ? "przetworzone" : row.paymentStatus}</span>
             <strong>${formatCurrency(row.amount)}</strong>
             ${
-              row.processed
-                ? `<button class="ghost history-open" type="button" data-history-visit="${row.linkedVisitId}">Otworz</button>`
-                : `<button class="primary promote-import" type="button" data-import-id="${selectedImport.id}" data-row-id="${row.id}">Przenies</button>`
+              row.processed && row.linkedVisitId
+                ? `<button class="ghost history-open" type="button" data-history-visit="${row.linkedVisitId}">Otworz sesje</button>`
+                : `<button class="primary promote-import" type="button" data-import-id="${selectedImport.id}" data-row-id="${row.id}">Przejmij do sesji</button>`
             }
           </article>
         `;
