@@ -734,10 +734,6 @@ function renderDashboard() {
   const selectedVisit = todayVisits.find((visit) => visit.id === state.selectedVisitId) || todayVisits[0] || null;
   const workingDayLabel = getWorkingDayLabel();
 
-  if (selectedVisit && selectedVisit.id !== state.selectedVisitId) {
-    state.selectedVisitId = selectedVisit.id;
-  }
-
   document.getElementById("day-context").innerHTML = `
     <div class="day-context-copy">
       <p class="panel-label">Aktywny dzien workflow</p>
