@@ -1765,8 +1765,6 @@ function renderPatientReconciliation() {
                   <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="false">Gotowka</button>
                   <button class="secondary external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="false">Inne konto</button>
                   <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="ignored" data-remember="false">Pomin</button>
-                  <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="cash" data-remember="true">Gotowka stale</button>
-                  <button class="ghost external-payment-match" type="button" data-target-id="${selectedSession.id}" data-method="other_account" data-remember="true">Inne konto stale</button>
                 </div>
               `
               : selectedSessions.length > 1
@@ -1957,16 +1955,14 @@ function renderReconciliation() {
         match.status === "confirmed" ? "success" : match.status === "missing" ? "warning" : match.confidence === "pewne" ? "success" : "neutral";
       const paymentExceptionActions =
         match.status === "missing"
-          ? `
-            <div class="external-payment-actions">
-              <button class="secondary external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="cash" data-remember="false">Gotowka</button>
-              <button class="secondary external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="other_account" data-remember="false">Inne konto</button>
-              <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="ignored" data-remember="false">Pomin</button>
-              <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="cash" data-remember="true">Gotowka stale</button>
-              <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="other_account" data-remember="true">Inne konto stale</button>
-            </div>
-          `
-          : "";
+            ? `
+              <div class="external-payment-actions">
+                <button class="secondary external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="cash" data-remember="false">Gotowka</button>
+                <button class="secondary external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="other_account" data-remember="false">Inne konto</button>
+                <button class="ghost external-payment-match" type="button" data-target-id="${firstTargetId}" data-method="ignored" data-remember="false">Pomin</button>
+              </div>
+            `
+            : "";
       const actionsCopy =
         match.transaction && match.status !== "confirmed"
           ? `
