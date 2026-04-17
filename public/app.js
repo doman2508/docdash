@@ -440,10 +440,15 @@ function getConfirmedPaymentMatchLookup() {
 
   const byTargetId = new Map();
   const bySessionKey = new Map();
+  const byMatchId = new Map();
 
   matches
     .filter((match) => match.status === "confirmed")
     .forEach((match) => {
+      if (match?.id && !byMatchId.has(match.id)) {
+        byMatchId.set(match.id, match);
+      }
+
       (match.targets || []).forEach((target) => {
         if (target?.id && !byTargetId.has(target.id)) {
           byTargetId.set(target.id, match);
@@ -454,10 +459,10 @@ function getConfirmedPaymentMatchLookup() {
           bySessionKey.set(key, match);
         }
       });
-    });
+  });
 
   confirmedPaymentMatchLookupSource = matches;
-  confirmedPaymentMatchLookupCache = { byTargetId, bySessionKey };
+  confirmedPaymentMatchLookupCache = { byTargetId, bySessionKey, byMatchId };
   return confirmedPaymentMatchLookupCache;
 }
 
@@ -469,6 +474,25 @@ function getConfirmedImportRowMatch(row) {
   const lookup = getConfirmedPaymentMatchLookup();
   const targetId = importRowTargetId(row);
   return lookup.byTargetId.get(targetId) || lookup.bySessionKey.get(sessionIdentityKey(row)) || null;
+}
+
+function getVisitTargetId(visit) {
+  return visit?.id ? `visit:${visit.id}` : "";
+}
+
+function getConfirmedVisitMatch(visit) {
+  if (!visit) {
+    return null;
+  }
+
+  const lookup = getConfirmedPaymentMatchLookup();
+  const targetId = getVisitTargetId(visit);
+  return (
+    lookup.byTargetId.get(targetId) ||
+    lookup.bySessionKey.get(sessionIdentityKey({ ...visit, amount: Number(visit.payment?.amount || 0) })) ||
+    (visit.payment?.paymentMatchId ? lookup.byMatchId.get(visit.payment.paymentMatchId) : null) ||
+    null
+  );
 }
 
 function getImportRowOutcomeMeta(row) {
@@ -562,8 +586,12 @@ function getVisitPaymentMeta(visit, overrides = {}) {
   }
 
   const outcomeMeta = getSessionOutcomeMeta(overrides.outcome || visit.sessionOutcome, visit.dateLabel);
-  const paymentStatus = overrides.paymentStatus || visit.payment?.status || "pending";
-  const usesStoredStatus = paymentStatus === visit.payment?.status;
+  const confirmedMatch = getConfirmedVisitMatch(visit);
+  const matchedExternalMeta = getExternalPaymentMeta(confirmedMatch?.externalPayment?.method);
+  const paymentStatus =
+    overrides.paymentStatus ||
+    (confirmedMatch ? (matchedExternalMeta?.ignored ? "ignored" : "paid") : visit.payment?.status || "pending");
+  const usesStoredStatus = !overrides.paymentStatus && paymentStatus === visit.payment?.status;
   const storedLabel = usesStoredStatus ? String(visit.payment?.statusLabel || "").trim() : "";
 
   if (!outcomeMeta.chargeable) {
@@ -581,17 +609,20 @@ function getVisitPaymentMeta(visit, overrides = {}) {
       settled: true,
       ignored: true,
       blockedByOutcome: false,
-      label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
+      label: matchedExternalMeta?.label || storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
       tone: "neutral"
     };
   }
 
   if (paymentStatus === "paid") {
+    const label = matchedExternalMeta?.label
+      || (!isPendingImportPaymentLabel(storedLabel) ? storedLabel : "")
+      || "oplacone";
     return {
       settled: true,
       ignored: false,
       blockedByOutcome: false,
-      label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
+      label,
       tone: "success"
     };
   }
