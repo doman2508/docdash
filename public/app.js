@@ -38,6 +38,7 @@ const state = {
   reconciliationSelectedSessionId: null,
   reconciliationSelectedSessionIds: [],
   reconciliationListFilter: "open",
+  reconciliationDateScope: "past",
   reconciliationSessionFilter: "selected",
   reconciliationTransactionFilter: "recommended",
   reconciliationFocusTransactionId: null,
@@ -1499,7 +1500,7 @@ function reconciliationPrimaryTarget(match) {
   })[0] || null;
 }
 
-function isReconciliationTargetDue(target) {
+function isReconciliationTargetDue(target, scope = "past") {
   const targetDate = getDateSortValue(target?.dateLabel);
   const todayDate = getDateSortValue(getCurrentDateKey()) || 0;
 
@@ -1507,7 +1508,21 @@ function isReconciliationTargetDue(target) {
     return false;
   }
 
-  return targetDate < todayDate;
+  return scope === "past_or_today" ? targetDate <= todayDate : targetDate < todayDate;
+}
+
+function getReconciliationDateScopeCopy(scope) {
+  if (scope === "past_or_today") {
+    return {
+      summary: "pozycji z przeszlosci i z dzisiaj",
+      empty: "Brak pozycji w tym filtrze dla wizyt z przeszlosci i z dzisiaj."
+    };
+  }
+
+  return {
+    summary: "pozycji z przeszlosci",
+    empty: "Brak pozycji w tym filtrze dla wizyt z przeszlosci."
+  };
 }
 
 function matchPassesReconciliationFilter(match, filterKey) {
@@ -1878,10 +1893,11 @@ function renderPatientReconciliation() {
 function renderReconciliation() {
   const reconciliation = state.data.paymentMatches || { summary: {}, matches: [] };
   const matches = reconciliation.matches || [];
+  const dateScopeCopy = getReconciliationDateScopeCopy(state.reconciliationDateScope);
   const dueMatches = matches
     .map((match) => ({
       ...match,
-      visibleTargets: (match.targets || []).filter(isReconciliationTargetDue)
+      visibleTargets: (match.targets || []).filter((target) => isReconciliationTargetDue(target, state.reconciliationDateScope))
     }))
     .filter((match) => match.visibleTargets.length);
   const sortedMatches = [...dueMatches].sort(compareReconciliationMatches);
@@ -2008,24 +2024,33 @@ function renderReconciliation() {
 
   document.getElementById("reconciliation-list").innerHTML = `
     <div class="reconciliation-toolbar">
-      <label>
-        Pokaz
-        <select id="reconciliation-status-filter">
-          <option value="open" ${state.reconciliationListFilter === "open" ? "selected" : ""}>Otwarte</option>
-          <option value="review" ${state.reconciliationListFilter === "review" ? "selected" : ""}>Do sprawdzenia</option>
-          <option value="missing" ${state.reconciliationListFilter === "missing" ? "selected" : ""}>Brak platnosci</option>
-          <option value="confirmed" ${state.reconciliationListFilter === "confirmed" ? "selected" : ""}>Potwierdzone</option>
-          <option value="all" ${state.reconciliationListFilter === "all" ? "selected" : ""}>Wszystkie</option>
-        </select>
-      </label>
-      <span>${filteredMatches.length} pozycji z przeszlosci, sort po dacie wizyty</span>
+      <div class="reconciliation-toolbar-filters">
+        <label>
+          Pokaz
+          <select id="reconciliation-status-filter">
+            <option value="open" ${state.reconciliationListFilter === "open" ? "selected" : ""}>Otwarte</option>
+            <option value="review" ${state.reconciliationListFilter === "review" ? "selected" : ""}>Do sprawdzenia</option>
+            <option value="missing" ${state.reconciliationListFilter === "missing" ? "selected" : ""}>Brak platnosci</option>
+            <option value="confirmed" ${state.reconciliationListFilter === "confirmed" ? "selected" : ""}>Potwierdzone</option>
+            <option value="all" ${state.reconciliationListFilter === "all" ? "selected" : ""}>Wszystkie</option>
+          </select>
+        </label>
+        <label>
+          Zakres
+          <select id="reconciliation-date-scope">
+            <option value="past" ${state.reconciliationDateScope === "past" ? "selected" : ""}>Tylko przeszle</option>
+            <option value="past_or_today" ${state.reconciliationDateScope === "past_or_today" ? "selected" : ""}>Przeszle + dzis</option>
+          </select>
+        </label>
+      </div>
+      <span>${filteredMatches.length} ${dateScopeCopy.summary}, sort po dacie wizyty</span>
     </div>
-    ${
-      visibleMatches.length
-        ? itemsHtml
-        : `<div class="empty-state">Brak pozycji w tym filtrze dla wizyt z przeszlosci.</div>`
-    }
-  `;
+      ${
+        visibleMatches.length
+          ? itemsHtml
+          : `<div class="empty-state">${dateScopeCopy.empty}</div>`
+      }
+    `;
 }
 
 function renderStats() {
@@ -3002,6 +3027,12 @@ function attachActions() {
 
   document.getElementById("reconciliation-status-filter")?.addEventListener("change", (event) => {
     state.reconciliationListFilter = event.target.value;
+    renderAll();
+    setActiveView("billing");
+  });
+
+  document.getElementById("reconciliation-date-scope")?.addEventListener("change", (event) => {
+    state.reconciliationDateScope = event.target.value;
     renderAll();
     setActiveView("billing");
   });

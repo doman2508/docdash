@@ -558,6 +558,12 @@ p {
   margin-bottom: 6px;
 }
 
+.reconciliation-toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .reconciliation-toolbar label {
   display: grid;
   gap: 4px;
