@@ -577,6 +577,22 @@ function buildImportedVisit(importRow) {
   };
 }
 
+function promoteImportRowToWorkflow(store, row) {
+  const existingVisitId = row.linkedVisitId || `workflow-${row.id}`;
+  let visit = (store.visits || []).find((entry) => entry.id === existingVisitId);
+
+  if (!visit) {
+    visit = buildImportedVisit(row);
+    store.visits.push(visit);
+  }
+
+  row.processed = true;
+  row.linkedVisitId = visit.id;
+  row.processedAt = row.processedAt || new Date().toISOString().slice(0, 16).replace("T", " ");
+
+  return { row, visit };
+}
+
 function getHeaderIndex(headers, names, fallback = -1) {
   const normalizedNames = names.map(normalizeSearchValue);
 
@@ -2759,20 +2775,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const existingVisitId = row.linkedVisitId || `workflow-${row.id}`;
-      const existingVisit = data.visits.find((visit) => visit.id === existingVisitId);
-
-      if (!row.processed && !existingVisit) {
-        const visit = buildImportedVisit(row);
-        data.visits.push(visit);
-        row.processed = true;
-        row.linkedVisitId = visit.id;
-        row.processedAt = new Date().toISOString().slice(0, 16).replace("T", " ");
-      } else if (existingVisit) {
-        row.processed = true;
-        row.linkedVisitId = existingVisit.id;
-        row.processedAt = row.processedAt || new Date().toISOString().slice(0, 16).replace("T", " ");
-      }
+      promoteImportRowToWorkflow(data, row);
 
       data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
       generatePaymentMatches(data);
@@ -2780,6 +2783,51 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, row);
     } catch (error) {
       sendJson(res, 400, { error: "Unable to promote import row" });
+    }
+
+    return;
+  }
+
+  if (pathname === "/api/imports/promote-day" && req.method === "POST") {
+    try {
+      const payload = await collectRequestBody(req);
+      const dateLabel = normalizeDateLabel(payload?.dateLabel);
+
+      if (!dateLabel) {
+        sendJson(res, 400, { error: "Missing dateLabel" });
+        return;
+      }
+
+      const data = readData();
+      const candidates = (data.imports || [])
+        .flatMap((batch) => (batch.rows || []).map((row) => ({ batchId: batch.id, row })))
+        .filter(({ row }) => normalizeDateLabel(row.dateLabel) === dateLabel)
+        .filter(({ row }) => !row.linkedVisitId);
+
+      const promotedVisits = [];
+
+      candidates.forEach(({ row }) => {
+        const result = promoteImportRowToWorkflow(data, row);
+        if (result?.visit?.id) {
+          promotedVisits.push({
+            visitId: result.visit.id,
+            patientName: result.visit.patientName,
+            dateLabel: result.visit.dateLabel,
+            time: result.visit.time
+          });
+        }
+      });
+
+      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+      generatePaymentMatches(data);
+      writeData(data);
+      sendJson(res, 200, {
+        dateLabel,
+        promotedCount: promotedVisits.length,
+        promotedVisits
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: "Unable to promote active day" });
     }
 
     return;

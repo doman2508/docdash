@@ -821,17 +821,30 @@ function renderDashboard() {
   const dayImportRows = getActiveDateImportRows();
   const selectedVisit = todayVisits.find((visit) => visit.id === state.selectedVisitId) || todayVisits[0] || null;
   const workingDayLabel = getWorkingDayLabel();
+  const importedPendingCount = dayImportRows.length;
+  const importedPendingLabel = importedPendingCount
+    ? `${importedPendingCount} z ZL czeka na przejecie`
+    : "brak wpisow ZL do przejecia";
 
   document.getElementById("day-context").innerHTML = `
     <div class="day-context-copy">
       <p class="panel-label">Aktywny dzien workflow</p>
       <h3>${workingDayLabel}</h3>
-      <p>Importy z tej daty wpadaja tu od razu jako pozycje dnia. Do workflow przejmujesz je dopiero wtedy, kiedy chcesz wejsc w sesje.</p>
+      <p>${
+        importedPendingCount
+          ? `Masz ${importedPendingCount} wpis${importedPendingCount === 1 ? "" : importedPendingCount < 5 ? "y" : "ow"} z ZL na ten dzien. Jednym ruchem przenosisz je do sesji DocDash i dalej pracujesz juz tylko u nas.`
+          : "Ten dzien jest juz przejety do DocDash. Dalej pracujesz tylko na sesjach, statusach i rozliczeniach."
+      }</p>
     </div>
     <div class="day-context-meta">
       <span class="day-pill">${todayVisits.length} wizyt w workflow</span>
-      <span class="day-pill">${metrics.importedPending} do przejecia z importu</span>
+      <span class="day-pill">${importedPendingLabel}</span>
       <span class="day-pill">${metrics.openItems} rzeczy do domkniecia</span>
+      ${
+        importedPendingCount
+          ? `<button class="primary" id="promote-active-day" type="button">Przejmij caly dzien do sesji</button>`
+          : ""
+      }
     </div>
   `;
 
@@ -884,12 +897,12 @@ function renderDashboard() {
               <article class="day-entry import-entry day-list-row" data-day-promote="${row.id}" data-import-id="${row.importId}">
                 <div>
                   <h4>${row.patientName}</h4>
-                  <p>${row.serviceName} - import z ${row.source}</p>
+                  <p>${row.serviceName} - wpis z ${row.source}</p>
                 </div>
                 <span class="day-entry-time">${row.time || "bez godziny"}</span>
-                <span class="tag">z importu</span>
+                <span class="tag">w ZL</span>
                 <span class="tag">${row.paymentStatus}</span>
-                <button class="primary" type="button">Przejmij</button>
+                <button class="ghost" type="button">Przejmij pojedynczo</button>
               </article>
             `;
           })
@@ -910,8 +923,8 @@ function renderDashboard() {
     `
     : `
       <p class="panel-label">Co dalej</p>
-      <h4>Przejmij rekord z importu albo dodaj wizyte recznie</h4>
-      <span>Dopiero wtedy Dzien bedzie pracowal na realnych sesjach dla ${workingDayLabel}.</span>
+      <h4>Przejmij dzien z ZL albo dodaj wizyte recznie</h4>
+      <span>Po przejeciu pracujesz juz na sesjach DocDash, a nie na samych wpisach z importu.</span>
     `;
   renderInbox(state.activeDateKey);
   document.getElementById("day-followup-panel").hidden = !state.showDayFollowup;
@@ -930,6 +943,10 @@ function renderDashboard() {
     item.onclick = async () => {
       await promoteImportRow(item.dataset.importId, item.dataset.dayPromote);
     };
+  });
+
+  document.getElementById("promote-active-day")?.addEventListener("click", async () => {
+    await promoteActiveDayToWorkflow();
   });
 }
 
@@ -2307,6 +2324,50 @@ async function promoteImportRow(importId, rowId) {
   renderAll();
   setActiveView("visit");
   setSaveStatus("Rekord z importu przeniesiony do workflow DocDash.", "success");
+}
+
+async function promoteActiveDayToWorkflow() {
+  if (!state.activeDateKey) {
+    setSaveStatus("Brak aktywnego dnia do przejecia.", "error");
+    return;
+  }
+
+  const pendingRows = getActiveDateImportRows();
+  if (!pendingRows.length) {
+    setSaveStatus("Ten dzien jest juz przejety do DocDash.", "idle");
+    return;
+  }
+
+  setSaveStatus("Przejmuje caly dzien do sesji DocDash...", "pending");
+
+  const response = await fetch("/api/imports/promote-day", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dateLabel: state.activeDateKey })
+  });
+
+  if (!response.ok) {
+    setSaveStatus("Nie udalo sie przejac calego dnia do sesji.", "error");
+    return;
+  }
+
+  const result = await response.json();
+  await refreshBootstrapData();
+
+  const firstVisit = result.promotedVisits?.[0];
+  if (firstVisit?.visitId) {
+    state.selectedVisitId = firstVisit.visitId;
+    state.selectedPatientName = firstVisit.patientName || state.selectedPatientName;
+  }
+
+  renderAll();
+  setActiveView("dashboard");
+  setSaveStatus(
+    result.promotedCount
+      ? `Przejeto ${result.promotedCount} ${result.promotedCount === 1 ? "wpis" : result.promotedCount < 5 ? "wpisy" : "wpisow"} z ${state.activeDateKey} do sesji DocDash.`
+      : `Na ${state.activeDateKey} nie bylo juz nic do przejecia.`,
+    "success"
+  );
 }
 
 function setCreateVisitPanelVisibility(isVisible) {
