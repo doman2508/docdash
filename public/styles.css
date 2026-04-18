@@ -996,7 +996,7 @@ p {
 .ledger-history-list {
   display: grid;
   gap: 4px;
-  max-height: 124px;
+  max-height: 220px;
   overflow: auto;
   padding-right: 4px;
 }
