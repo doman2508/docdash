@@ -1522,6 +1522,63 @@ function matchTargetFromSession(session) {
   };
 }
 
+function normalizeConfirmedMatchesForSessions(confirmedMatches, sessions) {
+  const sessionsById = new Map((sessions || []).map((session) => [session.id, session]));
+  const sessionsByKey = new Map((sessions || []).map((session) => [sessionIdentityKey(session), session]));
+  const sessionsByMatchId = new Map();
+
+  (sessions || []).forEach((session) => {
+    if (!session?.paymentMatchId) {
+      return;
+    }
+
+    if (!sessionsByMatchId.has(session.paymentMatchId)) {
+      sessionsByMatchId.set(session.paymentMatchId, []);
+    }
+
+    sessionsByMatchId.get(session.paymentMatchId).push(session);
+  });
+
+  return (confirmedMatches || []).map((match) => {
+    const resolvedSessions = [];
+    const resolvedIds = new Set();
+    const pushResolvedSession = (session) => {
+      if (!session?.id || resolvedIds.has(session.id)) {
+        return;
+      }
+
+      resolvedIds.add(session.id);
+      resolvedSessions.push(session);
+    };
+
+    (match.targets || []).forEach((target) => {
+      pushResolvedSession(sessionsById.get(target.id));
+
+      const targetKey = sessionIdentityKey(target);
+      if (targetKey) {
+        pushResolvedSession(sessionsByKey.get(targetKey));
+      }
+    });
+
+    (sessionsByMatchId.get(match.id) || []).forEach(pushResolvedSession);
+
+    if (!resolvedSessions.length) {
+      return match;
+    }
+
+    return {
+      ...match,
+      targets: resolvedSessions.map((session) => {
+        const normalizedTarget = matchTargetFromSession(session);
+        if (match.externalPayment?.label && isPendingPaymentStatusLabel(normalizedTarget.paymentStatusLabel)) {
+          normalizedTarget.paymentStatusLabel = match.externalPayment.label;
+        }
+        return normalizedTarget;
+      })
+    };
+  });
+}
+
 function buildMatch(transaction, sessions, score, kind = "single", reasons = []) {
   const totalAmount = sessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
   const targetSlug = sessions.map((session) => slugify(session.id)).join("-");
@@ -1753,7 +1810,10 @@ function generatePaymentMatches(store) {
   const aliases = Array.isArray(store.paymentAliases) ? store.paymentAliases : [];
   const paymentRules = Array.isArray(store.paymentRules) ? store.paymentRules : [];
   const rejectedPairs = rejectedPaymentSet(store);
-  const confirmedMatches = (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed");
+  const confirmedMatches = normalizeConfirmedMatchesForSessions(
+    (store.paymentMatches?.matches || []).filter((match) => match.status === "confirmed"),
+    sessions
+  );
   const confirmedSessionIds = new Set(confirmedMatches.flatMap((match) => (match.targets || []).map((target) => target.id)));
   const confirmedTransactionIds = new Set(confirmedMatches.map((match) => match.transaction?.id).filter(Boolean));
   const matches = [...confirmedMatches];
