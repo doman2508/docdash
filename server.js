@@ -298,6 +298,7 @@ function mergeImportRowState(preferred, duplicate) {
     paymentIgnored: preferred.paymentIgnored || duplicate.paymentIgnored,
     paymentIgnoredAt: preferred.paymentIgnoredAt || duplicate.paymentIgnoredAt,
     paymentStatus: preferred.paymentStatus || duplicate.paymentStatus,
+    paymentConfirmationSource: preferred.paymentConfirmationSource || duplicate.paymentConfirmationSource,
     source: preferred.source || duplicate.source
   };
 }
@@ -439,8 +440,12 @@ function retargetImportRowReferences(store, previousBatchId, previousRow, nextBa
       target.sessionOutcome = targetOutcome;
       target.sessionOutcomeLabel = sessionOutcomeMeta(targetOutcome, nextRow.dateLabel).label;
       target.paymentStatusLabel = isPaidImportRow(nextRow)
-        ? "oplacone"
+        ? paymentStatusLabelForConfirmationSource(
+          deriveImportRowPaymentConfirmationSource(nextRow),
+          nextRow.paymentStatus || target.paymentStatusLabel || "potwierdzone recznie"
+        )
         : (nextRow.paymentStatus || target.paymentStatusLabel || null);
+      target.paymentConfirmationSource = deriveImportRowPaymentConfirmationSource(nextRow);
       touched = true;
     });
 
@@ -692,6 +697,16 @@ function buildManualVisit(payload) {
   const dateKey = normalizeDateLabel(payload.dateLabel);
   const stage = dateKey === getCurrentDateKey() ? "today" : "planned";
   const sessionOutcome = normalizeSessionOutcome(payload.sessionOutcome, payload.dateLabel);
+  const payment = normalizeVisitPaymentState({
+    amount: Number(payload.amount || 0),
+    status: payload.paymentStatus || "pending",
+    statusLabel: payload.paymentStatus === "paid" ? "potwierdzone recznie" : "platnosc oczekuje",
+    method: payload.paymentMethod || "transfer",
+    documentType: payload.documentType || "none",
+    documentIssued: false,
+    followUpLabel: "do rozliczenia po sesji",
+    confirmationSource: payload.paymentConfirmationSource || ""
+  });
 
   return {
     id: `manual-${dateKey}-${slugify(payload.patientName)}-${Date.now()}`,
@@ -719,15 +734,7 @@ function buildManualVisit(payload) {
       zlSynced: payload.source === "ZL",
       lastActionLabel: "Dodano recznie do workflow"
     },
-    payment: {
-      amount: Number(payload.amount || 0),
-      status: payload.paymentStatus || "pending",
-      statusLabel: payload.paymentStatus === "paid" ? "potwierdzone recznie" : "platnosc oczekuje",
-      method: payload.paymentMethod || "transfer",
-      documentType: payload.documentType || "none",
-      documentIssued: false,
-      followUpLabel: "do rozliczenia po sesji"
-    }
+    payment
   };
 }
 
@@ -739,7 +746,9 @@ function updateVisit(currentVisit, patch) {
       ? normalizeSessionOutcome(patch.sessionOutcome, patch.dateLabel || currentVisit.dateLabel)
       : currentVisit.sessionOutcome,
     nextVisit: patch.nextVisit ? { ...currentVisit.nextVisit, ...patch.nextVisit } : currentVisit.nextVisit,
-    payment: patch.payment ? { ...currentVisit.payment, ...patch.payment } : currentVisit.payment,
+    payment: patch.payment
+      ? normalizeVisitPaymentState({ ...currentVisit.payment, ...patch.payment })
+      : currentVisit.payment,
     followUp: patch.followUp ? { ...currentVisit.followUp, ...patch.followUp } : currentVisit.followUp,
     closureChecklist: patch.closureChecklist || currentVisit.closureChecklist
   };
@@ -748,6 +757,7 @@ function updateVisit(currentVisit, patch) {
 function buildImportedVisit(importRow) {
   const stage = workflowStageForDate(importRow.dateLabel);
   const sessionOutcome = normalizeSessionOutcome(importRow.sessionOutcome, importRow.dateLabel);
+  const payment = buildVisitPaymentFromImportRow(importRow);
 
   return {
     id: `workflow-${importRow.id}`,
@@ -779,15 +789,7 @@ function buildImportedVisit(importRow) {
       zlSynced: true,
       lastActionLabel: "Przeniesiono z importu do workflow"
     },
-    payment: {
-      amount: Number(importRow.amount || 0),
-      status: "pending",
-      statusLabel: "platnosc oczekuje",
-      method: "transfer",
-      documentType: "none",
-      documentIssued: false,
-      followUpLabel: "zaimportowano z raportu ZL"
-    }
+    payment
   };
 }
 
@@ -1114,6 +1116,205 @@ function isIgnoredVisit(visit) {
   return visit.payment?.status === "ignored";
 }
 
+function normalizePaymentConfirmationSource(source, fallback = "none") {
+  const safe = String(source || "").trim().toLowerCase();
+  if (["none", "manual", "bank", "cash", "other_account", "ignored"].includes(safe)) {
+    return safe;
+  }
+
+  return fallback;
+}
+
+function deriveVisitPaymentConfirmationSource(payment = {}) {
+  if (payment?.status === "ignored") {
+    return "ignored";
+  }
+
+  if (payment?.bankTransactionId) {
+    return "bank";
+  }
+
+  const explicit = normalizePaymentConfirmationSource(payment?.confirmationSource, "");
+  if (explicit) {
+    return explicit;
+  }
+
+  if (payment?.status === "paid") {
+    if (payment?.method === "cash") {
+      return "cash";
+    }
+    if (payment?.method === "other_account") {
+      return "other_account";
+    }
+
+    return "manual";
+  }
+
+  return "none";
+}
+
+function deriveImportRowPaymentConfirmationSource(row = {}) {
+  if (row?.paymentIgnored) {
+    return "ignored";
+  }
+
+  if (row?.bankTransactionId) {
+    return "bank";
+  }
+
+  if (row?.externalPaymentMethod) {
+    return normalizePaymentConfirmationSource(row.externalPaymentMethod, "other_account");
+  }
+
+  const explicit = normalizePaymentConfirmationSource(row?.paymentConfirmationSource, "");
+  if (explicit) {
+    return explicit;
+  }
+
+  if (row?.paymentConfirmed) {
+    return "manual";
+  }
+
+  return "none";
+}
+
+function canAttachImportedBankPayment(session) {
+  return Boolean(
+    session?.paid &&
+    !session?.bankTransactionId &&
+    normalizePaymentConfirmationSource(session?.paymentConfirmationSource, "none") === "manual"
+  );
+}
+
+function paymentConfirmationSourcePriority(source) {
+  switch (normalizePaymentConfirmationSource(source, "none")) {
+    case "bank":
+      return 5;
+    case "cash":
+    case "other_account":
+      return 4;
+    case "manual":
+      return 3;
+    case "ignored":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function paymentStatusLabelForConfirmationSource(source, fallback = "potwierdzone recznie") {
+  switch (normalizePaymentConfirmationSource(source, "none")) {
+    case "bank":
+      return "potwierdzone z banku";
+    case "manual":
+      return "potwierdzone recznie";
+    case "cash":
+      return "gotowka";
+    case "other_account":
+      return "inne konto";
+    case "ignored":
+      return "pominieta";
+    default:
+      return fallback;
+  }
+}
+
+function normalizeVisitPaymentState(payment = {}) {
+  const status = payment?.status || "pending";
+  const method = payment?.method || "transfer";
+  let confirmationSource = deriveVisitPaymentConfirmationSource({ ...payment, status, method });
+  let statusLabel = String(payment?.statusLabel || "").trim();
+
+  if (status === "ignored") {
+    confirmationSource = "ignored";
+    statusLabel = paymentStatusLabelForConfirmationSource("ignored", statusLabel || "pominieta");
+  } else if (status === "paid") {
+    if (confirmationSource === "none") {
+      confirmationSource = method === "cash" ? "cash" : "manual";
+    }
+    statusLabel = paymentStatusLabelForConfirmationSource(
+      confirmationSource,
+      statusLabel || "potwierdzone recznie"
+    );
+  } else {
+    confirmationSource = "none";
+    statusLabel = statusLabel || (status === "partial" ? "platnosc czesciowa" : "platnosc oczekuje");
+  }
+
+  const normalized = {
+    ...payment,
+    status,
+    statusLabel,
+    method,
+    confirmationSource
+  };
+
+  if (status === "ignored") {
+    normalized.bankTransactionId = null;
+    normalized.paymentMatchId = null;
+  }
+
+  if (status !== "paid" && status !== "ignored") {
+    normalized.bankTransactionId = null;
+    normalized.paymentMatchId = null;
+    normalized.paidAt = null;
+  }
+
+  return normalized;
+}
+
+function buildVisitPaymentFromImportRow(importRow = {}, fallbackPayment = {}) {
+  const confirmationSource = deriveImportRowPaymentConfirmationSource(importRow);
+  const status = importRow.paymentIgnored ? "ignored" : isPaidImportRow(importRow) ? "paid" : "pending";
+  const method = confirmationSource === "cash" ? "cash" : fallbackPayment.method || "transfer";
+
+  return normalizeVisitPaymentState({
+    ...fallbackPayment,
+    amount: Number(importRow.amount || fallbackPayment.amount || 0),
+    status,
+    statusLabel: status === "paid" || status === "ignored"
+      ? paymentStatusLabelForConfirmationSource(
+        confirmationSource,
+        importRow.paymentStatus || fallbackPayment.statusLabel || "potwierdzone recznie"
+      )
+      : importRow.paymentStatus || fallbackPayment.statusLabel || "platnosc oczekuje",
+    method,
+    documentType: fallbackPayment.documentType || "none",
+    documentIssued: Boolean(fallbackPayment.documentIssued),
+    followUpLabel: fallbackPayment.followUpLabel || "zaimportowano z raportu ZL",
+    confirmationSource,
+    bankTransactionId: importRow.bankTransactionId || fallbackPayment.bankTransactionId || null,
+    paidAt: importRow.bankPaidAt || importRow.externalPaidAt || fallbackPayment.paidAt || null,
+    paymentMatchId: importRow.paymentMatchId || fallbackPayment.paymentMatchId || null
+  });
+}
+
+function importRowPaymentSnapshot(row = {}, linkedVisit = null) {
+  const visitPayment = linkedVisit?.payment || null;
+  const visitSource = visitPayment ? deriveVisitPaymentConfirmationSource(visitPayment) : "none";
+  const rowSource = deriveImportRowPaymentConfirmationSource(row);
+  const confirmationSource = paymentConfirmationSourcePriority(visitSource) >= paymentConfirmationSourcePriority(rowSource)
+    ? visitSource
+    : rowSource;
+  const paid = Boolean(isPaidImportRow(row) || (linkedVisit && isPaidVisit(linkedVisit)));
+  const bankTransactionId = visitPayment?.bankTransactionId || row.bankTransactionId || null;
+  const paymentMethod = visitPayment?.method || row.externalPaymentMethod || (bankTransactionId ? "transfer" : null);
+  const storedLabel = String(visitPayment?.statusLabel || row.paymentStatus || "").trim();
+  const paymentStatusLabel = paid
+    ? paymentStatusLabelForConfirmationSource(confirmationSource, storedLabel || "potwierdzone recznie")
+    : storedLabel || "platnosc oczekuje";
+
+  return {
+    paid,
+    bankTransactionId,
+    paymentMethod,
+    paymentStatusLabel,
+    paidAt: visitPayment?.paidAt || row.bankPaidAt || row.externalPaidAt || null,
+    paymentMatchId: visitPayment?.paymentMatchId || row.paymentMatchId || null,
+    paymentConfirmationSource: confirmationSource
+  };
+}
+
 function sessionIdentityKey(session) {
   if (!session) {
     return "";
@@ -1153,16 +1354,20 @@ function isPendingPaymentStatusLabel(label) {
 function mergeSessionRecords(existing, incoming) {
   const useIncomingOutcome =
     sessionOutcomePriority(incoming.sessionOutcome, incoming.dateLabel) >
-    sessionOutcomePriority(existing.sessionOutcome, existing.dateLabel);
+      sessionOutcomePriority(existing.sessionOutcome, existing.dateLabel);
   const incomingPaid = Boolean(incoming.paid);
   const existingPaid = Boolean(existing.paid);
   const preferIncomingPayment = incomingPaid && (!existingPaid || Boolean(incoming.bankTransactionId || incoming.paymentMatchId));
+  const existingSource = normalizePaymentConfirmationSource(existing.paymentConfirmationSource, existingPaid ? "manual" : "none");
+  const incomingSource = normalizePaymentConfirmationSource(incoming.paymentConfirmationSource, incomingPaid ? "manual" : "none");
+  const preferIncomingSource = paymentConfirmationSourcePriority(incomingSource) > paymentConfirmationSourcePriority(existingSource);
 
   let paymentStatusLabel = existing.paymentStatusLabel || null;
   if (
     !paymentStatusLabel ||
     isPendingPaymentStatusLabel(paymentStatusLabel) ||
-    preferIncomingPayment
+    preferIncomingPayment ||
+    preferIncomingSource
   ) {
     paymentStatusLabel = incoming.paymentStatusLabel || existing.paymentStatusLabel || null;
   }
@@ -1174,10 +1379,15 @@ function mergeSessionRecords(existing, incoming) {
     sessionOutcomeLabel: useIncomingOutcome ? incoming.sessionOutcomeLabel : existing.sessionOutcomeLabel,
     paid: existingPaid || incomingPaid,
     bankTransactionId: existing.bankTransactionId || incoming.bankTransactionId || null,
-    paymentMethod: existing.paymentMethod || incoming.paymentMethod || null,
+    paymentMethod: preferIncomingSource || !existing.paymentMethod
+      ? incoming.paymentMethod || existing.paymentMethod || null
+      : existing.paymentMethod || incoming.paymentMethod || null,
     paymentStatusLabel,
-    paidAt: existing.paidAt || incoming.paidAt || null,
-    paymentMatchId: existing.paymentMatchId || incoming.paymentMatchId || null
+    paidAt: preferIncomingSource
+      ? incoming.paidAt || existing.paidAt || null
+      : existing.paidAt || incoming.paidAt || null,
+    paymentMatchId: existing.paymentMatchId || incoming.paymentMatchId || null,
+    paymentConfirmationSource: preferIncomingSource ? incomingSource : existingSource
   };
 }
 
@@ -1199,6 +1409,7 @@ function collectSessions(store) {
       if (!isChargeableSessionOutcome(outcome, row.dateLabel)) {
         return;
       }
+      const paymentSnapshot = importRowPaymentSnapshot(row, linkedVisit);
 
       const sessionKey = sessionIdentityKey(row);
       if (seenSessionKeys.has(sessionKey)) {
@@ -1213,17 +1424,18 @@ function collectSessions(store) {
             patientName: row.patientName,
             dateLabel: row.dateLabel,
             time: row.time || "",
-            amount: Number(row.amount || 0),
-            sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
-            sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
-            paid: isPaidImportRow(row),
-            bankTransactionId: row.bankTransactionId || null,
-            paymentMethod: row.externalPaymentMethod || (row.bankTransactionId ? "transfer" : null),
-            paymentStatusLabel: row.paymentStatus || (isPaidImportRow(row) ? "oplacone" : "platnosc oczekuje"),
-            paidAt: row.bankPaidAt || row.externalPaidAt || null,
-            paymentMatchId: row.paymentMatchId || null
-          });
-        }
+              amount: Number(row.amount || 0),
+              sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
+              sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
+              paid: paymentSnapshot.paid,
+              bankTransactionId: paymentSnapshot.bankTransactionId,
+              paymentMethod: paymentSnapshot.paymentMethod,
+              paymentStatusLabel: paymentSnapshot.paymentStatusLabel,
+              paidAt: paymentSnapshot.paidAt,
+              paymentMatchId: paymentSnapshot.paymentMatchId,
+              paymentConfirmationSource: paymentSnapshot.paymentConfirmationSource
+            });
+          }
 
         return;
       }
@@ -1242,18 +1454,19 @@ function collectSessions(store) {
         patientName: row.patientName,
         dateLabel: row.dateLabel,
         time: row.time || "",
-        amount: Number(row.amount || 0),
-        sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
-        sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
-        paid: isPaidImportRow(row),
-        bankTransactionId: row.bankTransactionId || null,
-        paymentMethod: row.externalPaymentMethod || (row.bankTransactionId ? "transfer" : null),
-        paymentStatusLabel: row.paymentStatus || (isPaidImportRow(row) ? "oplacone" : "platnosc oczekuje"),
-        paidAt: row.bankPaidAt || row.externalPaidAt || null,
-        paymentMatchId: row.paymentMatchId || null
+          amount: Number(row.amount || 0),
+          sessionOutcome: normalizeSessionOutcome(outcome, row.dateLabel),
+          sessionOutcomeLabel: sessionOutcomeMeta(outcome, row.dateLabel).label,
+          paid: paymentSnapshot.paid,
+          bankTransactionId: paymentSnapshot.bankTransactionId,
+          paymentMethod: paymentSnapshot.paymentMethod,
+          paymentStatusLabel: paymentSnapshot.paymentStatusLabel,
+          paidAt: paymentSnapshot.paidAt,
+          paymentMatchId: paymentSnapshot.paymentMatchId,
+          paymentConfirmationSource: paymentSnapshot.paymentConfirmationSource
+        });
+        sessionIndexes.set(sessionKey, sessions.length - 1);
       });
-      sessionIndexes.set(sessionKey, sessions.length - 1);
-    });
   });
 
   (store.visits || []).forEach((visit) => {
@@ -1279,13 +1492,14 @@ function collectSessions(store) {
       amount: Number(visit.payment?.amount || 0),
       sessionOutcome: normalizeSessionOutcome(visit.sessionOutcome, visit.dateLabel),
       sessionOutcomeLabel: sessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel).label,
-      paid: isPaidVisit(visit),
-      bankTransactionId: visit.payment?.bankTransactionId || null,
-      paymentMethod: visit.payment?.method || null,
-      paymentStatusLabel: visit.payment?.statusLabel || (isPaidVisit(visit) ? "oplacone" : "platnosc oczekuje"),
-      paidAt: visit.payment?.paidAt || null,
-      paymentMatchId: visit.payment?.paymentMatchId || null
-    };
+        paid: isPaidVisit(visit),
+        bankTransactionId: visit.payment?.bankTransactionId || null,
+        paymentMethod: visit.payment?.method || null,
+        paymentStatusLabel: visit.payment?.statusLabel || (isPaidVisit(visit) ? "oplacone" : "platnosc oczekuje"),
+        paidAt: visit.payment?.paidAt || null,
+        paymentMatchId: visit.payment?.paymentMatchId || null,
+        paymentConfirmationSource: deriveVisitPaymentConfirmationSource(visit.payment)
+      };
     const sessionKey = sessionIdentityKey(visitSession);
 
     if (seenSessionKeys.has(sessionKey)) {
@@ -1518,7 +1732,8 @@ function matchTargetFromSession(session) {
     paymentMethod: session.paymentMethod || null,
     paymentStatusLabel: session.paymentStatusLabel || null,
     paidAt: session.paidAt || null,
-    paymentMatchId: session.paymentMatchId || null
+    paymentMatchId: session.paymentMatchId || null,
+    paymentConfirmationSource: session.paymentConfirmationSource || null
   };
 }
 
@@ -1819,6 +2034,7 @@ function generatePaymentMatches(store) {
   const matches = [...confirmedMatches];
   const usedSessionIds = new Set(confirmedSessionIds);
   const usedTransactionIds = new Set(confirmedTransactionIds);
+  const bankAttachableSessions = sessions.filter((session) => canAttachImportedBankPayment(session) && !usedSessionIds.has(session.id));
 
   sessions
     .filter((session) => !session.paid && !usedSessionIds.has(session.id))
@@ -1832,8 +2048,53 @@ function generatePaymentMatches(store) {
         `regula pacjenta: ${rule.label || EXTERNAL_PAYMENT_METHODS[externalPaymentMethod(rule.method)].label}`
       ]);
       applyExternalPaymentToTarget(store, match.targets[0], rule.method, match.id);
+        matches.push(match);
+        usedSessionIds.add(session.id);
+      });
+
+  const bankAttachCandidates = [];
+  transactions.forEach((transaction) => {
+    if (usedTransactionIds.has(transaction.id)) {
+      return;
+    }
+
+    bankAttachableSessions
+      .filter((session) => !usedSessionIds.has(session.id))
+      .filter((session) => Math.abs(Number(transaction.amount) - Number(session.amount)) < 0.01)
+      .filter((session) => !isPaymentRejected(rejectedPairs, transaction, session))
+      .filter((session) => patientTokenScore(session.patientName, transaction, aliases) >= 35)
+      .forEach((session) => {
+        const details = scoreTransactionForSession(transaction, session, aliases);
+        if (details.score >= 82) {
+          bankAttachCandidates.push({
+            transaction,
+            session,
+            score: details.score,
+            reasons: uniqueReasons(["dopieto do recznego potwierdzenia", ...details.reasons]),
+            distance: Math.abs(dateDistanceDays(session.dateLabel, transaction.transactionDate))
+          });
+        }
+      });
+  });
+
+  bankAttachCandidates
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.distance - right.distance;
+    })
+    .forEach((candidate) => {
+      if (usedTransactionIds.has(candidate.transaction.id) || usedSessionIds.has(candidate.session.id)) {
+        return;
+      }
+
+      const match = buildMatch(candidate.transaction, [candidate.session], candidate.score, "single", candidate.reasons);
+      confirmPaymentMatchInStore(store, match);
       matches.push(match);
-      usedSessionIds.add(session.id);
+      usedTransactionIds.add(candidate.transaction.id);
+      usedSessionIds.add(candidate.session.id);
     });
 
   const availableSessions = sessions.filter((session) => !session.paid && !usedSessionIds.has(session.id));
@@ -1996,23 +2257,30 @@ function applyPaymentToTarget(store, target, transaction, matchId) {
     const row = batch?.rows?.find((item) => item.id === target.rowId);
     if (row) {
       row.paymentConfirmed = true;
-      row.paymentStatus = "Zapłacono";
+      row.paymentStatus = paymentStatusLabelForConfirmationSource("bank", "potwierdzone z banku");
+      row.paymentConfirmationSource = "bank";
       row.bankTransactionId = transaction.id;
       row.bankPaidAt = paidAt;
       row.paymentMatchId = matchId;
+      row.externalPaymentMethod = null;
+      row.externalPaidAt = null;
+      row.paymentIgnored = false;
+      row.paymentIgnoredAt = null;
     }
 
     if (target.linkedVisitId) {
       const visit = (store.visits || []).find((item) => item.id === target.linkedVisitId);
       if (visit) {
-        visit.payment = {
+        visit.payment = normalizeVisitPaymentState({
           ...visit.payment,
           status: "paid",
-          statusLabel: "potwierdzone z banku",
+          statusLabel: paymentStatusLabelForConfirmationSource("bank", "potwierdzone z banku"),
+          confirmationSource: "bank",
+          method: visit.payment?.method || "transfer",
           bankTransactionId: transaction.id,
           paidAt,
           paymentMatchId: matchId
-        };
+        });
       }
     }
 
@@ -2021,14 +2289,16 @@ function applyPaymentToTarget(store, target, transaction, matchId) {
 
   const visit = (store.visits || []).find((item) => item.id === target.visitId);
   if (visit) {
-    visit.payment = {
+    visit.payment = normalizeVisitPaymentState({
       ...visit.payment,
       status: "paid",
-      statusLabel: "potwierdzone z banku",
+      statusLabel: paymentStatusLabelForConfirmationSource("bank", "potwierdzone z banku"),
+      confirmationSource: "bank",
+      method: visit.payment?.method || "transfer",
       bankTransactionId: transaction.id,
       paidAt,
       paymentMatchId: matchId
-    };
+    });
   }
 }
 
@@ -2043,13 +2313,24 @@ function applyExternalPaymentToTarget(store, target, method, matchId) {
     if (row) {
       if (safeMethod === "ignored") {
         row.paymentIgnored = true;
-        row.paymentStatus = methodInfo.label;
+        row.paymentStatus = paymentStatusLabelForConfirmationSource("ignored", methodInfo.label);
+        row.paymentConfirmationSource = "ignored";
         row.paymentIgnoredAt = paidAt;
+        row.paymentConfirmed = false;
+        row.bankTransactionId = null;
+        row.bankPaidAt = null;
+        row.externalPaymentMethod = null;
+        row.externalPaidAt = null;
       } else {
-        row.paymentConfirmed = true;
-        row.paymentStatus = methodInfo.label;
+        row.paymentConfirmed = safeMethod === "manual";
+        row.paymentStatus = paymentStatusLabelForConfirmationSource(safeMethod, methodInfo.label);
+        row.paymentConfirmationSource = safeMethod;
         row.externalPaymentMethod = safeMethod;
         row.externalPaidAt = paidAt;
+        row.bankTransactionId = null;
+        row.bankPaidAt = null;
+        row.paymentIgnored = false;
+        row.paymentIgnoredAt = null;
       }
 
       row.paymentMatchId = matchId;
@@ -2058,14 +2339,18 @@ function applyExternalPaymentToTarget(store, target, method, matchId) {
     if (target.linkedVisitId) {
       const visit = (store.visits || []).find((item) => item.id === target.linkedVisitId);
       if (visit) {
-        visit.payment = {
+        visit.payment = normalizeVisitPaymentState({
           ...visit.payment,
           status: safeMethod === "ignored" ? "ignored" : "paid",
-          statusLabel: methodInfo.label,
-          method: safeMethod,
+          statusLabel: paymentStatusLabelForConfirmationSource(
+            safeMethod === "ignored" ? "ignored" : safeMethod,
+            methodInfo.label
+          ),
+          confirmationSource: safeMethod === "ignored" ? "ignored" : safeMethod,
+          method: safeMethod === "cash" ? "cash" : visit.payment?.method || "transfer",
           paidAt,
           paymentMatchId: matchId
-        };
+        });
       }
     }
 
@@ -2074,14 +2359,18 @@ function applyExternalPaymentToTarget(store, target, method, matchId) {
 
   const visit = (store.visits || []).find((item) => item.id === target.visitId);
   if (visit) {
-    visit.payment = {
+    visit.payment = normalizeVisitPaymentState({
       ...visit.payment,
       status: safeMethod === "ignored" ? "ignored" : "paid",
-      statusLabel: methodInfo.label,
-      method: safeMethod,
+      statusLabel: paymentStatusLabelForConfirmationSource(
+        safeMethod === "ignored" ? "ignored" : safeMethod,
+        methodInfo.label
+      ),
+      confirmationSource: safeMethod === "ignored" ? "ignored" : safeMethod,
+      method: safeMethod === "cash" ? "cash" : visit.payment?.method || "transfer",
       paidAt,
       paymentMatchId: matchId
-    };
+    });
   }
 }
 
@@ -2313,13 +2602,20 @@ function buildPatientReconciliation(store, patientName) {
       null;
     const settledByConfirmedMatch = Boolean(confirmedMatch);
     const paid = Boolean(session.paid || settledByConfirmedMatch);
+    const paymentConfirmationSource = normalizePaymentConfirmationSource(
+      session.paymentConfirmationSource,
+      confirmedMatch?.externalPayment?.method || (confirmedMatch?.transaction ? "bank" : paid ? "manual" : "none")
+    );
     const paymentMethod =
       session.paymentMethod ||
       confirmedMatch?.externalPayment?.method ||
       (confirmedMatch?.transaction ? "transfer" : null);
     let paymentStatusLabel = session.paymentStatusLabel;
     if (paid && (!paymentStatusLabel || isPendingPaymentStatusLabel(paymentStatusLabel))) {
-      paymentStatusLabel = confirmedMatch?.externalPayment?.label || (confirmedMatch?.transaction ? "potwierdzone z banku" : "potwierdzone recznie");
+      paymentStatusLabel = paymentStatusLabelForConfirmationSource(
+        paymentConfirmationSource,
+        confirmedMatch?.externalPayment?.label || (confirmedMatch?.transaction ? "potwierdzone z banku" : "potwierdzone recznie")
+      );
     }
 
     return {
@@ -2329,7 +2625,8 @@ function buildPatientReconciliation(store, patientName) {
       paymentMethod,
       paymentStatusLabel,
       paidAt: session.paidAt || confirmedMatch?.transaction?.transactionDate || confirmedMatch?.confirmedAt || null,
-      paymentMatchId: session.paymentMatchId || confirmedMatch?.id || null
+      paymentMatchId: session.paymentMatchId || confirmedMatch?.id || null,
+      paymentConfirmationSource
     };
   });
 
@@ -2451,7 +2748,9 @@ function buildPatientReconciliation(store, patientName) {
 
   const settledAmount = settledSessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
   const openAmount = sessions.reduce((sum, session) => sum + Number(session.amount || 0), 0);
-  const externalSettledSessions = settledSessions.filter((session) => !session.bankTransactionId).length;
+  const externalSettledSessions = settledSessions.filter((session) => (
+    normalizePaymentConfirmationSource(session.paymentConfirmationSource, session.bankTransactionId ? "bank" : "manual") !== "bank"
+  )).length;
   const patientDisplayName =
     patientSessions[0]?.patientName ||
     sessions[0]?.patientName ||
@@ -2546,6 +2845,59 @@ function syncVisitOutcomeToImports(store, visit) {
     (batch.rows || []).forEach((row) => {
       if (row.linkedVisitId === visit.id && row.sessionOutcome !== visit.sessionOutcome) {
         row.sessionOutcome = visit.sessionOutcome;
+        updated += 1;
+      }
+    });
+  });
+
+  return updated;
+}
+
+function syncVisitPaymentToImports(store, visit) {
+  if (!visit?.id) {
+    return 0;
+  }
+
+  const payment = normalizeVisitPaymentState(visit.payment || {});
+  const confirmationSource = normalizePaymentConfirmationSource(payment.confirmationSource, deriveVisitPaymentConfirmationSource(payment));
+  const settled = payment.status === "paid" || payment.status === "ignored";
+  const paidAt = payment.paidAt || new Date().toISOString().slice(0, 10);
+  let updated = 0;
+
+  (store.imports || []).forEach((batch) => {
+    (batch.rows || []).forEach((row) => {
+      if (row.linkedVisitId !== visit.id) {
+        return;
+      }
+
+      const nextRowState = {
+        paymentConfirmed: settled && confirmationSource === "manual",
+        bankTransactionId: settled && confirmationSource === "bank" ? payment.bankTransactionId || null : null,
+        bankPaidAt: settled && confirmationSource === "bank" ? paidAt : null,
+        externalPaymentMethod: settled && ["cash", "other_account"].includes(confirmationSource) ? confirmationSource : null,
+        externalPaidAt: settled && ["cash", "other_account"].includes(confirmationSource) ? paidAt : null,
+        paymentIgnored: payment.status === "ignored",
+        paymentIgnoredAt: payment.status === "ignored" ? paidAt : null,
+        paymentStatus: payment.statusLabel || (settled ? paymentStatusLabelForConfirmationSource(confirmationSource) : "platnosc oczekuje"),
+        paymentMatchId: settled ? payment.paymentMatchId || null : null,
+        paymentConfirmationSource: settled || payment.status === "ignored" ? confirmationSource : "none"
+      };
+
+      const changed = [
+        "paymentConfirmed",
+        "bankTransactionId",
+        "bankPaidAt",
+        "externalPaymentMethod",
+        "externalPaidAt",
+        "paymentIgnored",
+        "paymentIgnoredAt",
+        "paymentStatus",
+        "paymentMatchId",
+        "paymentConfirmationSource"
+      ].some((key) => row[key] !== nextRowState[key]);
+
+      Object.assign(row, nextRowState);
+      if (changed) {
         updated += 1;
       }
     });
@@ -3038,12 +3390,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const updatedVisit = updateVisit(data.visits[visitIndex], patch);
-      data.visits[visitIndex] = updatedVisit;
-      syncVisitOutcomeToImports(data, updatedVisit);
-      data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
-      generatePaymentMatches(data);
-      writeData(data);
+        const updatedVisit = updateVisit(data.visits[visitIndex], patch);
+        data.visits[visitIndex] = updatedVisit;
+        syncVisitOutcomeToImports(data, updatedVisit);
+        syncVisitPaymentToImports(data, updatedVisit);
+        data.meta.lastUpdated = new Date().toISOString().slice(0, 16).replace("T", " ");
+        generatePaymentMatches(data);
+        writeData(data);
       sendJson(res, 200, updatedVisit);
     } catch (error) {
       sendJson(res, 400, { error: "Invalid request payload" });

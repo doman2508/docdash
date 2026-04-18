@@ -455,6 +455,10 @@ p {
   max-width: 30ch;
 }
 
+.visit-payment-source-hint {
+  max-width: 34ch;
+}
+
 .visit-billing-actions {
   align-items: center;
 }

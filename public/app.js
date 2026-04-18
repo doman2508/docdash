@@ -441,6 +441,115 @@ function getExternalPaymentMeta(method) {
   }
 }
 
+function normalizePaymentConfirmationSource(source, fallback = "none") {
+  const safe = String(source || "").trim().toLowerCase();
+  if (["none", "manual", "bank", "cash", "other_account", "ignored"].includes(safe)) {
+    return safe;
+  }
+
+  return fallback;
+}
+
+function paymentStatusLabelForConfirmationSource(source, fallback = "potwierdzone recznie") {
+  switch (normalizePaymentConfirmationSource(source, "none")) {
+    case "bank":
+      return "potwierdzone z banku";
+    case "manual":
+      return "potwierdzone recznie";
+    case "cash":
+      return "gotowka";
+    case "other_account":
+      return "inne konto";
+    case "ignored":
+      return "pominieta";
+    default:
+      return fallback;
+  }
+}
+
+function deriveVisitPaymentConfirmationSource(payment = {}, confirmedMatch = null) {
+  if (payment?.status === "ignored") {
+    return "ignored";
+  }
+
+  if (confirmedMatch?.externalPayment?.method) {
+    return normalizePaymentConfirmationSource(confirmedMatch.externalPayment.method, "other_account");
+  }
+
+  if (confirmedMatch?.transaction || payment?.bankTransactionId) {
+    return "bank";
+  }
+
+  const explicit = normalizePaymentConfirmationSource(payment?.confirmationSource, "");
+  if (explicit) {
+    return explicit;
+  }
+
+  if (payment?.status === "paid") {
+    if (payment?.method === "cash") {
+      return "cash";
+    }
+    if (payment?.method === "other_account") {
+      return "other_account";
+    }
+
+    return "manual";
+  }
+
+  return "none";
+}
+
+function deriveImportRowPaymentConfirmationSource(row = {}, confirmedMatch = null) {
+  if (row?.paymentIgnored || confirmedMatch?.externalPayment?.ignored) {
+    return "ignored";
+  }
+
+  if (confirmedMatch?.externalPayment?.method) {
+    return normalizePaymentConfirmationSource(confirmedMatch.externalPayment.method, "other_account");
+  }
+
+  if (confirmedMatch?.transaction || row?.bankTransactionId) {
+    return "bank";
+  }
+
+  if (row?.externalPaymentMethod) {
+    return normalizePaymentConfirmationSource(row.externalPaymentMethod, "other_account");
+  }
+
+  const explicit = normalizePaymentConfirmationSource(row?.paymentConfirmationSource, "");
+  if (explicit) {
+    return explicit;
+  }
+
+  if (row?.paymentConfirmed) {
+    return "manual";
+  }
+
+  return "none";
+}
+
+function editableVisitPaymentConfirmationSource(visit, paymentStatus, paymentMethod) {
+  const confirmedMatch = getConfirmedVisitMatch(visit);
+  const derived = deriveVisitPaymentConfirmationSource(
+    {
+      ...visit?.payment,
+      status: paymentStatus,
+      method: paymentMethod
+    },
+    confirmedMatch
+  );
+
+  if (paymentStatus !== "paid" || derived === "bank" || derived === "ignored") {
+    return "";
+  }
+
+  if (derived === "none") {
+    return paymentMethod === "cash" ? "cash" : "manual";
+  }
+
+  return derived;
+}
+
 let confirmedPaymentMatchLookupCache = null;
 let confirmedPaymentMatchLookupSource = null;
 
@@ -518,6 +627,7 @@ function getImportRowPaymentMeta(row) {
   const confirmedMatch = getConfirmedImportRowMatch(row);
   const externalMeta = getExternalPaymentMeta(row?.externalPaymentMethod);
   const matchedExternalMeta = getExternalPaymentMeta(confirmedMatch?.externalPayment?.method);
+  const confirmationSource = deriveImportRowPaymentConfirmationSource(row, confirmedMatch);
   const ignored = Boolean(row?.paymentIgnored || matchedExternalMeta?.ignored || externalMeta?.ignored);
   const settled = Boolean(
     confirmedMatch ||
@@ -541,9 +651,13 @@ function getImportRowPaymentMeta(row) {
     return {
       settled: true,
       ignored: true,
-      label: row?.paymentStatus || matchedExternalMeta?.label || externalMeta?.label || "pominieta",
+      label: paymentStatusLabelForConfirmationSource(
+        confirmationSource,
+        row?.paymentStatus || matchedExternalMeta?.label || externalMeta?.label || "pominieta"
+      ),
       tone: "neutral",
-      match: confirmedMatch
+      match: confirmedMatch,
+      confirmationSource
     };
   }
 
@@ -552,7 +666,8 @@ function getImportRowPaymentMeta(row) {
       storedLabel: row?.paymentStatus,
       paymentMethod: row?.externalPaymentMethod,
       hasBankLink: Boolean(confirmedMatch?.transaction || row?.bankTransactionId),
-      confirmedExternalMethod: confirmedMatch?.externalPayment?.method
+      confirmedExternalMethod: confirmedMatch?.externalPayment?.method,
+      confirmationSource
     });
 
     return {
@@ -560,7 +675,8 @@ function getImportRowPaymentMeta(row) {
       ignored: false,
       label,
       tone: "success",
-      match: confirmedMatch
+      match: confirmedMatch,
+      confirmationSource
     };
   }
 
@@ -569,7 +685,8 @@ function getImportRowPaymentMeta(row) {
     ignored: false,
     label: "nierozliczona",
     tone: "warning",
-    match: null
+    match: null,
+    confirmationSource: "none"
   };
 }
 
@@ -594,7 +711,18 @@ function isGenericPaidStatusLabel(label) {
   return !value || ["oplacone", "zaplacono", "potwierdzone", "paid"].includes(value);
 }
 
-function resolvedPaidPaymentLabel({ storedLabel = "", paymentMethod = "", hasBankLink = false, confirmedExternalMethod = "" } = {}) {
+function resolvedPaidPaymentLabel({
+  storedLabel = "",
+  paymentMethod = "",
+  hasBankLink = false,
+  confirmedExternalMethod = "",
+  confirmationSource = ""
+} = {}) {
+  const explicitSource = normalizePaymentConfirmationSource(confirmationSource, "");
+  if (explicitSource && explicitSource !== "none") {
+    return paymentStatusLabelForConfirmationSource(explicitSource, storedLabel || "potwierdzone recznie");
+  }
+
   const confirmedExternalMeta = getExternalPaymentMeta(confirmedExternalMethod);
   if (confirmedExternalMeta && !confirmedExternalMeta.ignored) {
     return confirmedExternalMeta.label;
@@ -625,7 +753,8 @@ function getLedgerSessionPaymentLabel(session) {
   return resolvedPaidPaymentLabel({
     storedLabel: session.paymentStatusLabel,
     paymentMethod: session.paymentMethod,
-    hasBankLink: Boolean(session.bankTransactionId)
+    hasBankLink: Boolean(session.bankTransactionId),
+    confirmationSource: session.paymentConfirmationSource
   });
 }
 
@@ -643,9 +772,21 @@ function getVisitPaymentMeta(visit, overrides = {}) {
   const outcomeMeta = getSessionOutcomeMeta(overrides.outcome || visit.sessionOutcome, visit.dateLabel);
   const confirmedMatch = getConfirmedVisitMatch(visit);
   const matchedExternalMeta = getExternalPaymentMeta(confirmedMatch?.externalPayment?.method);
+  const paymentMethod = overrides.paymentMethod || visit.payment?.method;
   const paymentStatus =
     overrides.paymentStatus ||
-    (confirmedMatch ? (matchedExternalMeta?.ignored ? "ignored" : "paid") : visit.payment?.status || "pending");
+      (confirmedMatch ? (matchedExternalMeta?.ignored ? "ignored" : "paid") : visit.payment?.status || "pending");
+  const confirmationSource = paymentStatus === "paid" || paymentStatus === "ignored"
+    ? deriveVisitPaymentConfirmationSource(
+      {
+        ...visit.payment,
+        status: paymentStatus,
+        method: paymentMethod,
+        confirmationSource: overrides.confirmationSource ?? visit.payment?.confirmationSource
+      },
+      confirmedMatch
+    )
+    : "none";
   const usesStoredStatus = !overrides.paymentStatus && paymentStatus === visit.payment?.status;
   const storedLabel = usesStoredStatus ? String(visit.payment?.statusLabel || "").trim() : "";
 
@@ -655,7 +796,9 @@ function getVisitPaymentMeta(visit, overrides = {}) {
       ignored: true,
       blockedByOutcome: true,
       label: "bez naleznosci",
-      tone: "neutral"
+      tone: "neutral",
+      confirmationSource: "none",
+      bankLinked: false
     };
   }
 
@@ -664,24 +807,32 @@ function getVisitPaymentMeta(visit, overrides = {}) {
       settled: true,
       ignored: true,
       blockedByOutcome: false,
-      label: matchedExternalMeta?.label || storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
-      tone: "neutral"
+      label: paymentStatusLabelForConfirmationSource(
+        confirmationSource,
+        matchedExternalMeta?.label || storedLabel || defaultVisitPaymentStatusLabel(paymentStatus)
+      ),
+      tone: "neutral",
+      confirmationSource,
+      bankLinked: false
     };
   }
 
   if (paymentStatus === "paid") {
     const label = resolvedPaidPaymentLabel({
       storedLabel,
-      paymentMethod: overrides.paymentMethod || visit.payment?.method,
+      paymentMethod,
       hasBankLink: Boolean(confirmedMatch?.transaction || visit.payment?.bankTransactionId),
-      confirmedExternalMethod: confirmedMatch?.externalPayment?.method
+      confirmedExternalMethod: confirmedMatch?.externalPayment?.method,
+      confirmationSource
     });
     return {
       settled: true,
       ignored: false,
       blockedByOutcome: false,
       label,
-      tone: "success"
+      tone: "success",
+      confirmationSource,
+      bankLinked: confirmationSource === "bank"
     };
   }
 
@@ -691,7 +842,9 @@ function getVisitPaymentMeta(visit, overrides = {}) {
       ignored: false,
       blockedByOutcome: false,
       label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
-      tone: "neutral"
+      tone: "neutral",
+      confirmationSource: "none",
+      bankLinked: false
     };
   }
 
@@ -700,7 +853,9 @@ function getVisitPaymentMeta(visit, overrides = {}) {
     ignored: false,
     blockedByOutcome: false,
     label: storedLabel || defaultVisitPaymentStatusLabel(paymentStatus),
-    tone: "warning"
+    tone: "warning",
+    confirmationSource: "none",
+    bankLinked: false
   };
 }
 
@@ -1466,6 +1621,7 @@ function renderBilling() {
   setChoiceState("payment-status", visit.payment.status);
   setChoiceState("payment-method", visit.payment.method);
   setChoiceState("payment-document", visit.payment.documentType);
+  clearChoiceState("payment-confirmation-source");
   updateVisitBillingPresentation();
 
   document.getElementById("payment-list").innerHTML = openPayments.length
@@ -1497,6 +1653,7 @@ function updateVisitBillingPresentation() {
   const visit = getSelectedVisit();
   const paymentBadge = document.getElementById("visit-payment-badge");
   const paymentContext = document.getElementById("visit-billing-context");
+  const paymentSourceHint = document.getElementById("visit-payment-source-hint");
   const amountField = document.getElementById("billing-amount");
   const markPaidButton = document.getElementById("mark-paid");
   const issueDocumentButton = document.getElementById("issue-document");
@@ -1504,13 +1661,24 @@ function updateVisitBillingPresentation() {
     document.querySelector('[data-choice-group="session-outcome"].active')?.dataset.choiceValue || visit.sessionOutcome;
   const selectedPaymentStatus =
     document.querySelector('[data-choice-group="payment-status"].active')?.dataset.choiceValue || visit.payment.status;
+  const selectedPaymentMethod =
+    document.querySelector('[data-choice-group="payment-method"].active')?.dataset.choiceValue || visit.payment.method;
+  const selectedConfirmationSource =
+    document.querySelector('[data-choice-group="payment-confirmation-source"].active')?.dataset.choiceValue || "";
   const outcomeMeta = getSessionOutcomeMeta(selectedOutcome, visit.dateLabel);
-  const paymentMeta = getVisitPaymentMeta(visit, { outcome: selectedOutcome, paymentStatus: selectedPaymentStatus });
+  const paymentMeta = getVisitPaymentMeta(visit, {
+    outcome: selectedOutcome,
+    paymentStatus: selectedPaymentStatus,
+    paymentMethod: selectedPaymentMethod,
+    confirmationSource: selectedConfirmationSource || undefined
+  });
+  const sourceLocked = paymentMeta.bankLinked;
 
   if (paymentMeta.blockedByOutcome) {
     clearChoiceState("payment-status");
     clearChoiceState("payment-method");
     clearChoiceState("payment-document");
+    clearChoiceState("payment-confirmation-source");
   } else {
     if (!document.querySelector('[data-choice-group="payment-status"].active')) {
       setChoiceState("payment-status", visit.payment.status);
@@ -1521,23 +1689,73 @@ function updateVisitBillingPresentation() {
     if (!document.querySelector('[data-choice-group="payment-document"].active')) {
       setChoiceState("payment-document", visit.payment.documentType);
     }
+    if (selectedPaymentStatus !== "paid" || sourceLocked) {
+      clearChoiceState("payment-confirmation-source");
+    } else if (!document.querySelector('[data-choice-group="payment-confirmation-source"].active')) {
+      const editableSource = editableVisitPaymentConfirmationSource(visit, selectedPaymentStatus, selectedPaymentMethod);
+      if (editableSource) {
+        setChoiceState("payment-confirmation-source", editableSource);
+      }
+    }
   }
 
-  ["payment-status", "payment-method", "payment-document"].forEach((group) => {
+  ["payment-status", "payment-method"].forEach((group) => {
     document.querySelectorAll(`[data-choice-group="${group}"]`).forEach((button) => {
-      button.disabled = paymentMeta.blockedByOutcome;
-      button.title = paymentMeta.blockedByOutcome ? "Ta sesja nie buduje naleznosci." : "";
+      const locked = paymentMeta.blockedByOutcome || sourceLocked;
+      button.disabled = locked;
+      button.title = paymentMeta.blockedByOutcome
+        ? "Ta sesja nie buduje naleznosci."
+        : sourceLocked
+          ? "Ta platnosc jest juz powiazana z importem bankowym."
+        : "";
     });
   });
 
+  document.querySelectorAll('[data-choice-group="payment-document"]').forEach((button) => {
+    button.disabled = paymentMeta.blockedByOutcome;
+    button.title = paymentMeta.blockedByOutcome ? "Dokument nie jest potrzebny dla tej sesji." : "";
+  });
+
+  document.querySelectorAll('[data-choice-group="payment-confirmation-source"]').forEach((button) => {
+    const locked = paymentMeta.blockedByOutcome || selectedPaymentStatus !== "paid" || sourceLocked;
+    button.disabled = locked;
+    button.title = paymentMeta.blockedByOutcome
+      ? "Ta sesja nie buduje naleznosci."
+      : sourceLocked
+        ? "Zrodlo potwierdzenia ustawil import banku."
+        : selectedPaymentStatus !== "paid"
+          ? "Najpierw oznacz platnosc jako potwierdzona."
+          : "";
+  });
+
   if (amountField) {
-    amountField.disabled = paymentMeta.blockedByOutcome;
-    amountField.title = paymentMeta.blockedByOutcome ? "Kwota nie wymaga rozliczenia dla tej sesji." : "";
+    amountField.disabled = paymentMeta.blockedByOutcome || sourceLocked;
+    amountField.title = paymentMeta.blockedByOutcome
+      ? "Kwota nie wymaga rozliczenia dla tej sesji."
+      : sourceLocked
+        ? "Kwota jest juz zweryfikowana przez import banku."
+        : "";
   }
 
   if (markPaidButton) {
-    markPaidButton.disabled = paymentMeta.blockedByOutcome;
-    markPaidButton.title = paymentMeta.blockedByOutcome ? "Ta sesja nie wymaga rozliczenia." : "";
+    markPaidButton.disabled = paymentMeta.blockedByOutcome || sourceLocked;
+    const editableSource = selectedPaymentStatus === "paid"
+      ? editableVisitPaymentConfirmationSource(visit, selectedPaymentStatus, selectedPaymentMethod)
+      : "";
+    markPaidButton.textContent = sourceLocked
+      ? "Powiazane z bankiem"
+      : selectedPaymentStatus !== "paid"
+        ? "Zapisz rozliczenie"
+        : editableSource === "cash"
+          ? "Zapisz gotowke"
+          : editableSource === "other_account"
+            ? "Zapisz inne konto"
+            : "Potwierdz bez banku";
+    markPaidButton.title = paymentMeta.blockedByOutcome
+      ? "Ta sesja nie wymaga rozliczenia."
+      : sourceLocked
+        ? "Ta platnosc jest juz powiazana z importem bankowym."
+        : "";
   }
 
   if (issueDocumentButton) {
@@ -1554,6 +1772,22 @@ function updateVisitBillingPresentation() {
     paymentContext.textContent = paymentMeta.blockedByOutcome
       ? `${visit.patientName} | ${visit.dateLabel} ${visit.time} | bez naleznosci, bo sesja jest oznaczona jako ${outcomeMeta.label}`
       : `${visit.patientName} | ${visit.dateLabel} ${visit.time} | ${paymentMeta.label}`;
+  }
+
+  if (paymentSourceHint) {
+    if (paymentMeta.blockedByOutcome) {
+      paymentSourceHint.textContent = "Ta sesja nie buduje naleznosci, wiec zrodlo potwierdzenia nie jest potrzebne.";
+    } else if (sourceLocked) {
+      paymentSourceHint.textContent = "Powiazane z realnym wplywem bankowym. To potwierdzenie przyszlo z importu banku.";
+    } else if (selectedPaymentStatus !== "paid") {
+      paymentSourceHint.textContent = "Najpierw oznacz naleznosc jako potwierdzona. Dopiero wtedy wybierasz, skad mamy to potwierdzenie.";
+    } else if (paymentMeta.confirmationSource === "cash") {
+      paymentSourceHint.textContent = "Sesja zostanie oznaczona jako rozliczona gotowka.";
+    } else if (paymentMeta.confirmationSource === "other_account") {
+      paymentSourceHint.textContent = "Sesja zostanie oznaczona jako rozliczona poza importowanym kontem.";
+    } else {
+      paymentSourceHint.textContent = "To potwierdzenie reczne bez twardego linku do banku. Pozniejszy import moze je jeszcze dopiac do wplywu.";
+    }
   }
 }
 
@@ -1587,8 +1821,17 @@ function isDocumentRequired(outcome, payment) {
 }
 
 function derivePaymentFollowUpLabel(payment, documentNeeded) {
+  const paidLabel = resolvedPaidPaymentLabel({
+    storedLabel: payment?.statusLabel,
+    paymentMethod: payment?.method,
+    hasBankLink: Boolean(payment?.bankTransactionId),
+    confirmationSource: payment?.confirmationSource
+  });
+
   if (payment.status === "paid") {
-    return documentNeeded && !payment.documentIssued ? "oplacone, dokument do wystawienia" : "oplacone po sesji";
+    return documentNeeded && !payment.documentIssued
+      ? `${paidLabel}, dokument do wystawienia`
+      : `${paidLabel} po sesji`;
   }
 
   if (payment.status === "partial") {
@@ -1627,7 +1870,12 @@ function buildCloseoutState(visit, visitPatch, paymentPatch) {
       label: !paymentNeeded
         ? "Ta sesja nie buduje naleznosci"
         : payment.status === "paid"
-          ? `Platnosc ${formatCurrency(payment.amount)} potwierdzona`
+          ? `Platnosc ${formatCurrency(payment.amount)}: ${resolvedPaidPaymentLabel({
+            storedLabel: payment.statusLabel,
+            paymentMethod: payment.method,
+            hasBankLink: Boolean(payment.bankTransactionId),
+            confirmationSource: payment.confirmationSource
+          })}`
           : payment.status === "partial"
             ? `Platnosc ${formatCurrency(payment.amount)} oznaczona jako czesciowa`
             : `Platnosc ${formatCurrency(payment.amount)} nadal oczekuje`,
@@ -2949,10 +3197,13 @@ function collectVisitPatch() {
 
 function collectBillingPatch() {
   const visit = getSelectedVisit();
+  const confirmedMatch = getConfirmedVisitMatch(visit);
   const status =
     document.querySelector('[data-choice-group="payment-status"].active')?.dataset.choiceValue || visit.payment.status || "pending";
   const method =
     document.querySelector('[data-choice-group="payment-method"].active')?.dataset.choiceValue || visit.payment.method || "transfer";
+  const selectedConfirmationSource =
+    document.querySelector('[data-choice-group="payment-confirmation-source"].active')?.dataset.choiceValue || "";
   const documentType =
     document.querySelector('[data-choice-group="payment-document"].active')?.dataset.choiceValue
       || visit.payment.documentType
@@ -2962,6 +3213,17 @@ function collectBillingPatch() {
     : visit.payment.documentType === documentType
       ? Boolean(visit.payment.documentIssued)
       : false;
+  const confirmationSource = status === "paid"
+    ? normalizePaymentConfirmationSource(
+      selectedConfirmationSource,
+      editableVisitPaymentConfirmationSource(visit, status, method) || deriveVisitPaymentConfirmationSource(
+        { ...visit.payment, status, method },
+        confirmedMatch
+      )
+    )
+    : status === "ignored"
+      ? "ignored"
+      : "none";
 
   return {
     payment: {
@@ -2972,11 +3234,13 @@ function collectBillingPatch() {
         ? resolvedPaidPaymentLabel({
           storedLabel: visit.payment?.statusLabel,
           paymentMethod: method,
-          hasBankLink: Boolean(getConfirmedVisitMatch(visit)?.transaction || visit.payment?.bankTransactionId),
-          confirmedExternalMethod: getConfirmedVisitMatch(visit)?.externalPayment?.method
+          hasBankLink: Boolean(confirmedMatch?.transaction || visit.payment?.bankTransactionId),
+          confirmedExternalMethod: confirmedMatch?.externalPayment?.method,
+          confirmationSource
         })
         : defaultVisitPaymentStatusLabel(status),
       method,
+      confirmationSource,
       documentType,
       documentIssued
     }
@@ -3057,7 +3321,9 @@ function hasVisitEditorChanges(visit, visitPatch, payment) {
     Number(visit.payment.amount || 0) !== Number(payment.amount || 0) ||
     visit.payment.status !== payment.status ||
     visit.payment.method !== payment.method ||
-    visit.payment.documentType !== payment.documentType
+    visit.payment.documentType !== payment.documentType ||
+    normalizePaymentConfirmationSource(visit.payment.confirmationSource, deriveVisitPaymentConfirmationSource(visit.payment)) !==
+      normalizePaymentConfirmationSource(payment.confirmationSource, "none")
   );
 }
 
@@ -3121,10 +3387,10 @@ function attachActions() {
       if (button.dataset.choiceGroup === "session-outcome") {
         updateSessionOutcomeHint(button.dataset.choiceValue, getSelectedVisit()?.dateLabel);
       }
-      if (["session-outcome", "next-status", "payment-status", "payment-method", "payment-document"].includes(button.dataset.choiceGroup)) {
+      if (["session-outcome", "next-status", "payment-status", "payment-method", "payment-document", "payment-confirmation-source"].includes(button.dataset.choiceGroup)) {
         renderVisitCloseoutPreview();
       }
-      if (["session-outcome", "payment-status", "payment-method", "payment-document"].includes(button.dataset.choiceGroup)) {
+      if (["session-outcome", "payment-status", "payment-method", "payment-document", "payment-confirmation-source"].includes(button.dataset.choiceGroup)) {
         updateVisitBillingPresentation();
       }
     };
@@ -3179,10 +3445,19 @@ function attachActions() {
   };
 
   document.getElementById("mark-paid").onclick = async () => {
-    const { payload } = buildVisitSavePayload({ forcePaid: true });
+    const { payload, paymentPatch } = buildVisitSavePayload();
+    const paymentLabel = resolvedPaidPaymentLabel({
+      storedLabel: paymentPatch.payment.statusLabel,
+      paymentMethod: paymentPatch.payment.method,
+      hasBankLink: Boolean(paymentPatch.payment.bankTransactionId),
+      confirmationSource: paymentPatch.payment.confirmationSource
+    });
+    const saveCopy = paymentPatch.payment.status === "paid"
+      ? `Rozliczenie zapisane jako: ${paymentLabel}.`
+      : "Rozliczenie zapisane.";
     await saveVisit(
       payload,
-      "Platnosc potwierdzona recznie."
+      saveCopy
     );
   };
 

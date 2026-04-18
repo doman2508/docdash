@@ -244,7 +244,7 @@
                 <div class="panel-header compact-header">
                   <div>
                     <p class="panel-label">Platnosc</p>
-                    <h3>Rozliczenie po sesji</h3>
+                    <h3>Platnosc i dokument</h3>
                     <p class="field-hint visit-billing-context" id="visit-billing-context"></p>
                   </div>
                   <span class="badge neutral" id="visit-payment-badge">platnosc oczekuje</span>
@@ -256,12 +256,22 @@
                 </div>
 
                 <div class="form-section">
-                  <label>Status</label>
+                  <label>Stan naleznosci</label>
                   <div class="choice-row">
                     <button class="choice" data-choice-group="payment-status" data-choice-value="paid" type="button">Potwierdzona</button>
                     <button class="choice" data-choice-group="payment-status" data-choice-value="pending" type="button">Oczekuje</button>
                     <button class="choice" data-choice-group="payment-status" data-choice-value="partial" type="button">Czesciowa</button>
                   </div>
+                </div>
+
+                <div class="form-section">
+                  <label>Zrodlo potwierdzenia</label>
+                  <div class="choice-row payment-source-row">
+                    <button class="choice" data-choice-group="payment-confirmation-source" data-choice-value="manual" type="button">Recznie</button>
+                    <button class="choice" data-choice-group="payment-confirmation-source" data-choice-value="cash" type="button">Gotowka</button>
+                    <button class="choice" data-choice-group="payment-confirmation-source" data-choice-value="other_account" type="button">Inne konto</button>
+                  </div>
+                  <p class="field-hint visit-payment-source-hint" id="visit-payment-source-hint"></p>
                 </div>
 
                 <div class="form-section">
@@ -283,9 +293,9 @@
                 </div>
 
                 <div class="inline-actions visit-billing-actions">
-                  <button class="secondary" id="mark-paid" type="button">Potwierdz recznie</button>
+                    <button class="secondary" id="mark-paid" type="button">Potwierdz bez banku</button>
                   <button class="primary" id="issue-document" type="button">Wystaw dokument</button>
-                  <button class="ghost" id="open-validation" type="button">Walidacja z bankiem</button>
+                  <button class="ghost" id="open-validation" type="button">Sprawdz w banku</button>
                 </div>
               </section>
 
