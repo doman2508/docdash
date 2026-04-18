@@ -5,7 +5,7 @@ const views = {
   },
   imports: {
     title: "Importy",
-    subtitle: "Tymczasowo zaimportowane zestawienia z ZnanyLekarz i innych zrodel."
+    subtitle: "ZL i bank jako wejscie danych do DocDash oraz historia ostatnich batchy."
   },
   patients: {
     title: "Pacjenci",
@@ -17,7 +17,7 @@ const views = {
   },
   billing: {
     title: "Walidacja platnosci",
-    subtitle: "Import banku, dopasowanie do sesji i wyjatki wymagajace recznej decyzji."
+    subtitle: "Dopasowanie do sesji, potwierdzenia i wyjatki wymagajace recznej decyzji."
   },
   stats: {
     title: "Statystyki miesieczne",
@@ -2660,15 +2660,18 @@ async function runReconciliationImport() {
       return;
     }
 
-    const result = await response.json();
-    setReconciliationImportStatus("Import zapisany. Odswiezam widok danych...", "pending");
-    await refreshBootstrapData({ timeoutMs: 30000 });
-    await refreshOpenPatientReconciliation();
-    renderAll();
-    setActiveView("billing");
-    const importedParts = [];
-    if (result.zl) {
-      importedParts.push(`ZL: ${result.zl.rows} wizyt`);
+      const result = await response.json();
+      setReconciliationImportStatus("Import zapisany. Odswiezam widok danych...", "pending");
+      await refreshBootstrapData({ timeoutMs: 30000 });
+      if (result.zl?.id) {
+        state.selectedImportId = result.zl.id;
+        state.showImportArchive = false;
+      }
+      await refreshOpenPatientReconciliation();
+      renderAll();
+      const importedParts = [];
+      if (result.zl) {
+        importedParts.push(`ZL: ${result.zl.rows} wizyt`);
     }
 
     if (result.bank) {
@@ -3474,6 +3477,10 @@ navButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     await navigateToView(button.dataset.view);
   });
+});
+
+document.getElementById("open-imports-view")?.addEventListener("click", async () => {
+  await navigateToView("imports");
 });
 
 document.getElementById("open-data-tools")?.addEventListener("click", () => {

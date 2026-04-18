@@ -369,6 +369,17 @@ p {
   gap: 16px;
 }
 
+.imports-intake-panel {
+  margin-bottom: 16px;
+}
+
+.imports-intake-copy {
+  margin: 0 0 12px;
+  color: var(--muted);
+  max-width: 820px;
+  line-height: 1.45;
+}
+
 .patients-layout {
   grid-template-columns: minmax(260px, 0.85fr) minmax(420px, 1.55fr);
   align-items: start;
@@ -493,6 +504,10 @@ p {
   grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
   gap: 14px;
   align-items: end;
+}
+
+.imports-intake-grid {
+  margin-top: 2px;
 }
 
 .reconciliation-actions {

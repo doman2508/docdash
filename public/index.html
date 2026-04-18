@@ -46,7 +46,7 @@
             </p>
           </div>
           <div class="hero-actions">
-            <button class="secondary" type="button">Import z ZL</button>
+            <button class="secondary" id="open-imports-view" type="button">Importy</button>
             <button class="secondary" id="open-data-tools" type="button">Dane</button>
             <button class="primary" id="open-create-visit" type="button">Nowa wizyta</button>
             <button class="ghost" id="logout-button" type="button">Wyloguj</button>
@@ -354,6 +354,39 @@
         </section>
 
         <section class="view" id="imports-view">
+          <section class="panel imports-intake-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label">Wejscie danych</p>
+                <h3>Import ZL i banku</h3>
+              </div>
+            </div>
+
+            <p class="imports-intake-copy">
+              Tutaj zasilamy DocDash danymi z zewnatrz. ZL traktujemy jako centralny kalendarz, a po imporcie
+              przechodzimy do walidacji platnosci i pracy na sesjach.
+            </p>
+
+            <div class="reconciliation-import-grid imports-intake-grid">
+              <div class="form-section">
+                <label for="reconciliation-zl-file">Kalendarz ZnanyLekarz XLSX</label>
+                <input id="reconciliation-zl-file" type="file" accept=".xlsx,.xls" />
+              </div>
+
+              <div class="form-section">
+                <label for="reconciliation-bank-file">Wplywy z banku CSV</label>
+                <input id="reconciliation-bank-file" type="file" accept=".csv,text/csv" />
+              </div>
+
+              <div class="reconciliation-actions">
+                <div class="inline-actions">
+                  <button class="primary" id="run-reconciliation-import" type="button">Importuj i dopasuj</button>
+                </div>
+                <p class="reconciliation-import-status" id="reconciliation-import-status" data-state="idle">Mozesz wrzucic sam CSV z banku albo bank + ZL.</p>
+              </div>
+            </div>
+          </section>
+
           <div class="imports-layout">
             <section class="panel">
               <div class="panel-header">
@@ -409,27 +442,10 @@
             <div class="panel-header">
               <div>
                 <p class="panel-label">Walidacja platnosci</p>
-                <h3>Import ZL + wplywy bankowe</h3>
+                <h3>Pozycje do decyzji</h3>
               </div>
-            </div>
-
-            <div class="reconciliation-import-grid">
-              <div class="form-section">
-                <label for="reconciliation-zl-file">Kalendarz ZnanyLekarz XLSX</label>
-                <input id="reconciliation-zl-file" type="file" accept=".xlsx,.xls" />
-              </div>
-
-              <div class="form-section">
-                <label for="reconciliation-bank-file">Wplywy z banku CSV</label>
-                <input id="reconciliation-bank-file" type="file" accept=".csv,text/csv" />
-              </div>
-
-              <div class="reconciliation-actions">
-                <div class="inline-actions">
-                  <button class="primary" id="run-reconciliation-import" type="button">Importuj i dopasuj</button>
-                  <button class="secondary" id="confirm-confident-matches" type="button">Potwierdz pewne</button>
-                </div>
-                <p class="reconciliation-import-status" id="reconciliation-import-status" data-state="idle">Mozesz wrzucic sam CSV z banku albo bank + ZL.</p>
+              <div class="inline-actions">
+                <button class="secondary" id="confirm-confident-matches" type="button">Potwierdz pewne</button>
               </div>
             </div>
 
