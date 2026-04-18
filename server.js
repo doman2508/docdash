@@ -722,7 +722,7 @@ function buildManualVisit(payload) {
     payment: {
       amount: Number(payload.amount || 0),
       status: payload.paymentStatus || "pending",
-      statusLabel: payload.paymentStatus === "paid" ? "oplacone" : "platnosc oczekuje",
+      statusLabel: payload.paymentStatus === "paid" ? "potwierdzone recznie" : "platnosc oczekuje",
       method: payload.paymentMethod || "transfer",
       documentType: payload.documentType || "none",
       documentIssued: false,
@@ -2008,7 +2008,7 @@ function applyPaymentToTarget(store, target, transaction, matchId) {
         visit.payment = {
           ...visit.payment,
           status: "paid",
-          statusLabel: "oplacone",
+          statusLabel: "potwierdzone z banku",
           bankTransactionId: transaction.id,
           paidAt,
           paymentMatchId: matchId
@@ -2024,7 +2024,7 @@ function applyPaymentToTarget(store, target, transaction, matchId) {
     visit.payment = {
       ...visit.payment,
       status: "paid",
-      statusLabel: "oplacone",
+      statusLabel: "potwierdzone z banku",
       bankTransactionId: transaction.id,
       paidAt,
       paymentMatchId: matchId
@@ -2319,7 +2319,7 @@ function buildPatientReconciliation(store, patientName) {
       (confirmedMatch?.transaction ? "transfer" : null);
     let paymentStatusLabel = session.paymentStatusLabel;
     if (paid && (!paymentStatusLabel || isPendingPaymentStatusLabel(paymentStatusLabel))) {
-      paymentStatusLabel = confirmedMatch?.externalPayment?.label || "oplacone";
+      paymentStatusLabel = confirmedMatch?.externalPayment?.label || (confirmedMatch?.transaction ? "potwierdzone z banku" : "potwierdzone recznie");
     }
 
     return {

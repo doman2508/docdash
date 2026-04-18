@@ -548,11 +548,12 @@ function getImportRowPaymentMeta(row) {
   }
 
   if (settled) {
-    const rawLabel = String(row?.paymentStatus || "").trim();
-    const label = matchedExternalMeta?.label
-      || (!isPendingImportPaymentLabel(rawLabel) ? rawLabel : "")
-      || externalMeta?.label
-      || "oplacone";
+    const label = resolvedPaidPaymentLabel({
+      storedLabel: row?.paymentStatus,
+      paymentMethod: row?.externalPaymentMethod,
+      hasBankLink: Boolean(confirmedMatch?.transaction || row?.bankTransactionId),
+      confirmedExternalMethod: confirmedMatch?.externalPayment?.method
+    });
 
     return {
       settled: true,
@@ -574,7 +575,7 @@ function getImportRowPaymentMeta(row) {
 
 function defaultVisitPaymentStatusLabel(status) {
   if (status === "paid") {
-    return "oplacone";
+    return "potwierdzone recznie";
   }
 
   if (status === "partial") {
@@ -586,6 +587,46 @@ function defaultVisitPaymentStatusLabel(status) {
   }
 
   return "platnosc oczekuje";
+}
+
+function isGenericPaidStatusLabel(label) {
+  const value = normalizeSearchValue(label);
+  return !value || ["oplacone", "zaplacono", "potwierdzone", "paid"].includes(value);
+}
+
+function resolvedPaidPaymentLabel({ storedLabel = "", paymentMethod = "", hasBankLink = false, confirmedExternalMethod = "" } = {}) {
+  const confirmedExternalMeta = getExternalPaymentMeta(confirmedExternalMethod);
+  if (confirmedExternalMeta && !confirmedExternalMeta.ignored) {
+    return confirmedExternalMeta.label;
+  }
+
+  if (hasBankLink) {
+    return "potwierdzone z banku";
+  }
+
+  const methodMeta = getExternalPaymentMeta(paymentMethod);
+  if (methodMeta && !methodMeta.ignored) {
+    return methodMeta.label;
+  }
+
+  const label = String(storedLabel || "").trim();
+  if (label && !isPendingImportPaymentLabel(label) && !isGenericPaidStatusLabel(label)) {
+    return label;
+  }
+
+  return "potwierdzone recznie";
+}
+
+function getLedgerSessionPaymentLabel(session) {
+  if (!session) {
+    return "rozliczona";
+  }
+
+  return resolvedPaidPaymentLabel({
+    storedLabel: session.paymentStatusLabel,
+    paymentMethod: session.paymentMethod,
+    hasBankLink: Boolean(session.bankTransactionId)
+  });
 }
 
 function getVisitPaymentMeta(visit, overrides = {}) {
@@ -629,9 +670,12 @@ function getVisitPaymentMeta(visit, overrides = {}) {
   }
 
   if (paymentStatus === "paid") {
-    const label = matchedExternalMeta?.label
-      || (!isPendingImportPaymentLabel(storedLabel) ? storedLabel : "")
-      || "oplacone";
+    const label = resolvedPaidPaymentLabel({
+      storedLabel,
+      paymentMethod: overrides.paymentMethod || visit.payment?.method,
+      hasBankLink: Boolean(confirmedMatch?.transaction || visit.payment?.bankTransactionId),
+      confirmedExternalMethod: confirmedMatch?.externalPayment?.method
+    });
     return {
       settled: true,
       ignored: false,
@@ -2098,7 +2142,7 @@ function renderPatientReconciliation() {
                       <article class="ledger-history-item">
                         <div>
                           <strong>${session.dateLabel} ${session.time || ""}</strong>
-                          <span>${session.paymentStatusLabel || "oplacone"}</span>
+                          <span>${getLedgerSessionPaymentLabel(session)}</span>
                         </div>
                         <div class="ledger-history-meta">
                           <strong>${formatCurrency(session.amount)}</strong>
@@ -2907,10 +2951,12 @@ function collectBillingPatch() {
   const visit = getSelectedVisit();
   const status =
     document.querySelector('[data-choice-group="payment-status"].active')?.dataset.choiceValue || visit.payment.status || "pending";
+  const method =
+    document.querySelector('[data-choice-group="payment-method"].active')?.dataset.choiceValue || visit.payment.method || "transfer";
   const documentType =
     document.querySelector('[data-choice-group="payment-document"].active')?.dataset.choiceValue
-    || visit.payment.documentType
-    || "none";
+      || visit.payment.documentType
+      || "none";
   const documentIssued = documentType === "none"
     ? false
     : visit.payment.documentType === documentType
@@ -2922,9 +2968,15 @@ function collectBillingPatch() {
       ...visit.payment,
       amount: Number(document.getElementById("billing-amount").value || visit.payment.amount),
       status,
-      statusLabel: defaultVisitPaymentStatusLabel(status),
-      method:
-        document.querySelector('[data-choice-group="payment-method"].active')?.dataset.choiceValue || visit.payment.method || "transfer",
+      statusLabel: status === "paid"
+        ? resolvedPaidPaymentLabel({
+          storedLabel: visit.payment?.statusLabel,
+          paymentMethod: method,
+          hasBankLink: Boolean(getConfirmedVisitMatch(visit)?.transaction || visit.payment?.bankTransactionId),
+          confirmedExternalMethod: getConfirmedVisitMatch(visit)?.externalPayment?.method
+        })
+        : defaultVisitPaymentStatusLabel(status),
+      method,
       documentType,
       documentIssued
     }
@@ -2946,7 +2998,12 @@ function buildVisitSavePayload(options = {}) {
 
   if (options.forcePaid) {
     payment.status = "paid";
-    payment.statusLabel = "oplacone";
+    payment.statusLabel = resolvedPaidPaymentLabel({
+      storedLabel: payment.statusLabel,
+      paymentMethod: payment.method,
+      hasBankLink: Boolean(getConfirmedVisitMatch(visit)?.transaction || visit.payment?.bankTransactionId),
+      confirmedExternalMethod: getConfirmedVisitMatch(visit)?.externalPayment?.method
+    });
   }
 
   if (options.autoIssueDocument && closeoutState.documentNeeded) {
@@ -3125,7 +3182,7 @@ function attachActions() {
     const { payload } = buildVisitSavePayload({ forcePaid: true });
     await saveVisit(
       payload,
-      "Platnosc oznaczona jako oplacona."
+      "Platnosc potwierdzona recznie."
     );
   };
 
