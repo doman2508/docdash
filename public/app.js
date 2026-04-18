@@ -3368,6 +3368,26 @@ async function openVisitById(visitId) {
   setActiveView("visit");
 }
 
+async function openSelectedPatientCardFromVisit() {
+  const visit = getSelectedVisit();
+  if (!visit) {
+    return;
+  }
+
+  const patientName = visit.patientName;
+  const canContinue = await autosaveVisitIfNeeded("Zmiany zapisane automatycznie przed otwarciem karty pacjenta.");
+  if (!canContinue) {
+    return;
+  }
+
+  state.selectedPatientName = patientName;
+  state.patientSearch = patientName;
+  renderPatients();
+  attachActions();
+  setActiveView("patients");
+  setSaveStatus(`Otwarta karta pacjenta: ${patientName}.`, "idle");
+}
+
 async function navigateToView(viewKey) {
   if (viewKey !== "visit") {
     const canContinue = await autosaveVisitIfNeeded();
@@ -3469,14 +3489,18 @@ function attachActions() {
     );
   };
 
-  document.getElementById("open-validation").onclick = async () => {
-    const navigated = await navigateToView("billing");
-    if (navigated) {
-      setSaveStatus("Przeszedles do walidacji platnosci dla calej praktyki.", "idle");
-    }
-  };
+    document.getElementById("open-validation").onclick = async () => {
+      const navigated = await navigateToView("billing");
+      if (navigated) {
+        setSaveStatus("Przeszedles do walidacji platnosci dla calej praktyki.", "idle");
+      }
+    };
 
-  const notesPreview = document.getElementById("visit-notes");
+    document.getElementById("open-visit-patient-card").onclick = async () => {
+      await openSelectedPatientCardFromVisit();
+    };
+
+    const notesPreview = document.getElementById("visit-notes");
   const openNotesWorkspaceButton = document.getElementById("open-notes-workspace");
   const closeNotesWorkspaceButton = document.getElementById("close-notes-workspace");
   const notesWorkspaceInput = document.getElementById("notes-workspace-input");

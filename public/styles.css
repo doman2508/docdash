@@ -399,6 +399,18 @@ p {
   gap: 12px;
 }
 
+.visit-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.visit-header-actions .ghost {
+  white-space: nowrap;
+}
+
 .compact-panel {
   padding: 18px;
 }
