@@ -260,6 +260,27 @@ function importRowIdentityKey(row) {
   ].join("|");
 }
 
+function importSessionTargetId(batchId, rowId) {
+  return `import:${batchId}:${rowId}`;
+}
+
+function workflowStageForDate(dateLabel) {
+  return normalizeDateLabel(dateLabel) === getCurrentDateKey() ? "today" : "planned";
+}
+
+function workflowDayBucketForDate(dateLabel) {
+  return workflowStageForDate(dateLabel) === "today" ? "today" : "archive";
+}
+
+function timeSortValue(label) {
+  const match = String(label || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
 function mergeImportRowState(preferred, duplicate) {
   return {
     ...preferred,
@@ -279,6 +300,199 @@ function mergeImportRowState(preferred, duplicate) {
     paymentStatus: preferred.paymentStatus || duplicate.paymentStatus,
     source: preferred.source || duplicate.source
   };
+}
+
+function canReuseExistingImportRow(store, entry, incomingRow) {
+  if (!entry?.row?.linkedVisitId) {
+    return true;
+  }
+
+  const visit = (store.visits || []).find((item) => item.id === entry.row.linkedVisitId);
+  if (!visit || visit.status !== "closed") {
+    return true;
+  }
+
+  return importRowIdentityKey(entry.row) === importRowIdentityKey(incomingRow);
+}
+
+function findMovedImportCandidate(store, incomingRow, existingEntries, usedRows) {
+  const incomingPatientKey = normalizeSearchValue(incomingRow.patientName);
+  if (!incomingPatientKey) {
+    return null;
+  }
+
+  const incomingAmount = Number(incomingRow.amount || 0);
+  const incomingServiceKey = normalizeSearchValue(incomingRow.serviceName);
+  const incomingIdentityKey = importRowIdentityKey(incomingRow);
+
+  return (existingEntries || [])
+    .filter((entry) => entry?.row && !usedRows.has(entry.row))
+    .filter((entry) => normalizeSearchValue(entry.row.patientName) === incomingPatientKey)
+    .filter((entry) => Number(entry.row.amount || 0) === incomingAmount)
+    .filter((entry) => importRowIdentityKey(entry.row) !== incomingIdentityKey)
+    .filter((entry) => {
+      const existingServiceKey = normalizeSearchValue(entry.row.serviceName);
+      return !incomingServiceKey || !existingServiceKey || incomingServiceKey === existingServiceKey;
+    })
+    .filter((entry) => canReuseExistingImportRow(store, entry, incomingRow))
+    .map((entry) => {
+      const dayDistance = Math.abs(dateDistanceDays(entry.row.dateLabel, incomingRow.dateLabel));
+      if (dayDistance > 3) {
+        return null;
+      }
+
+      const incomingMinutes = timeSortValue(incomingRow.time);
+      const existingMinutes = timeSortValue(entry.row.time);
+      const timeDistance = Number.isFinite(incomingMinutes) && Number.isFinite(existingMinutes)
+        ? Math.abs(existingMinutes - incomingMinutes)
+        : 180;
+
+      let score = dayDistance * 1000 + Math.min(timeDistance, 720);
+      if (entry.row.linkedVisitId) {
+        score -= 120;
+      }
+      if (entry.row.processed) {
+        score -= 40;
+      }
+      if (isPaidImportRow(entry.row)) {
+        score -= 20;
+      }
+
+      return {
+        entry,
+        score,
+        dayDistance,
+        timeDistance
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return left.score - right.score;
+      }
+      if (left.dayDistance !== right.dayDistance) {
+        return left.dayDistance - right.dayDistance;
+      }
+      return left.timeDistance - right.timeDistance;
+    })[0]?.entry || null;
+}
+
+function syncVisitFromImportRow(store, linkedVisitId, row) {
+  if (!linkedVisitId) {
+    return null;
+  }
+
+  const visit = (store.visits || []).find((item) => item.id === linkedVisitId);
+  if (!visit || visit.status === "closed") {
+    return visit || null;
+  }
+
+  const previousOutcome = normalizeSessionOutcome(visit.sessionOutcome, visit.dateLabel);
+  const syncedStage = workflowStageForDate(row.dateLabel);
+
+  visit.patientName = row.patientName || visit.patientName;
+  visit.serviceName = row.serviceName || visit.serviceName;
+  visit.dateLabel = row.dateLabel;
+  visit.time = row.time || visit.time;
+  visit.workflowStage = syncedStage;
+  visit.dayBucket = workflowDayBucketForDate(row.dateLabel);
+  if (previousOutcome === "scheduled" || previousOutcome === "completed") {
+    visit.sessionOutcome = defaultSessionOutcome(row.dateLabel);
+  }
+  visit.followUp = {
+    ...visit.followUp,
+    zlSynced: true,
+    lastActionLabel: `Termin zsynchronizowany z ZL (${row.dateLabel}${row.time ? ` ${row.time}` : ""})`
+  };
+  visit.payment = {
+    ...visit.payment,
+    amount: Number(row.amount || visit.payment?.amount || 0)
+  };
+
+  return visit;
+}
+
+function retargetImportRowReferences(store, previousBatchId, previousRow, nextBatchId, nextRow) {
+  const previousTargetId = importSessionTargetId(previousBatchId, previousRow.id);
+  const nextTargetId = importSessionTargetId(nextBatchId, nextRow.id);
+  const targetOutcome = normalizeSessionOutcome(
+    nextRow.sessionOutcome || previousRow.sessionOutcome,
+    nextRow.dateLabel
+  );
+
+  (store.paymentMatches?.matches || []).forEach((match) => {
+    let touched = false;
+
+    (match.targets || []).forEach((target) => {
+      if (target.id !== previousTargetId) {
+        return;
+      }
+
+      target.id = nextTargetId;
+      target.importId = nextBatchId;
+      target.rowId = nextRow.id;
+      target.linkedVisitId = nextRow.linkedVisitId || previousRow.linkedVisitId || target.linkedVisitId || null;
+      target.patientName = nextRow.patientName;
+      target.dateLabel = nextRow.dateLabel;
+      target.time = nextRow.time || "";
+      target.amount = Number(nextRow.amount || 0);
+      target.sessionOutcome = targetOutcome;
+      target.sessionOutcomeLabel = sessionOutcomeMeta(targetOutcome, nextRow.dateLabel).label;
+      target.paymentStatusLabel = isPaidImportRow(nextRow)
+        ? "oplacone"
+        : (nextRow.paymentStatus || target.paymentStatusLabel || null);
+      touched = true;
+    });
+
+    if (!touched || !match.transaction?.id) {
+      return;
+    }
+
+    (store.bankImports || []).forEach((batch) => {
+      (batch.transactions || []).forEach((transaction) => {
+        if (transaction.id !== match.transaction.id || !Array.isArray(transaction.matchedTargets)) {
+          return;
+        }
+
+        transaction.matchedTargets = transaction.matchedTargets.map((targetId) => (
+          targetId === previousTargetId ? nextTargetId : targetId
+        ));
+      });
+    });
+  });
+
+  (store.paymentRejectedMatches || []).forEach((item) => {
+    if (item.targetId === previousTargetId) {
+      item.targetId = nextTargetId;
+    }
+  });
+}
+
+function removeImportRows(store, rowsToRemove) {
+  if (!rowsToRemove?.size) {
+    return;
+  }
+
+  store.imports = (store.imports || [])
+    .map((batch) => {
+      const nextRows = (batch.rows || []).filter((row) => !rowsToRemove.has(row));
+      return {
+        ...batch,
+        rowCount: nextRows.length,
+        rows: nextRows
+      };
+    })
+    .filter((batch) => (batch.rows || []).length);
+}
+
+function mergeIncomingImportRow(store, incomingRow, existingEntry, nextBatchId) {
+  const mergedRow = mergeImportRowState(incomingRow, existingEntry.row);
+  mergedRow.linkedVisitId = mergedRow.linkedVisitId || existingEntry.row.linkedVisitId || null;
+  if (mergedRow.linkedVisitId) {
+    syncVisitFromImportRow(store, mergedRow.linkedVisitId, mergedRow);
+  }
+  retargetImportRowReferences(store, existingEntry.batchId, existingEntry.row, nextBatchId, mergedRow);
+  return mergedRow;
 }
 
 function cleanupDuplicateImportRows(store) {
@@ -532,7 +746,7 @@ function updateVisit(currentVisit, patch) {
 }
 
 function buildImportedVisit(importRow) {
-  const stage = normalizeDateLabel(importRow.dateLabel) === getCurrentDateKey() ? "today" : "planned";
+  const stage = workflowStageForDate(importRow.dateLabel);
   const sessionOutcome = normalizeSessionOutcome(importRow.sessionOutcome, importRow.dateLabel);
 
   return {
@@ -541,7 +755,7 @@ function buildImportedVisit(importRow) {
     source: "ZL import",
     serviceName: importRow.serviceName || "konsultacja",
     workflowStage: stage,
-    dayBucket: stage === "today" ? "today" : "archive",
+    dayBucket: workflowDayBucketForDate(importRow.dateLabel),
     dateLabel: importRow.dateLabel,
     time: importRow.time || "brak godziny",
     status: "open",
@@ -584,6 +798,8 @@ function promoteImportRowToWorkflow(store, row) {
   if (!visit) {
     visit = buildImportedVisit(row);
     store.visits.push(visit);
+  } else {
+    syncVisitFromImportRow(store, visit.id, row);
   }
 
   row.processed = true;
@@ -803,32 +1019,52 @@ function parseBankCsv(buffer, fileName) {
 
 function mergeZlBatch(store, batch) {
   store.imports = store.imports || [];
-  const existingRows = new Map();
+  const existingLookups = new Map();
+  const existingEntries = [];
 
   store.imports.forEach((existingBatch) => {
     (existingBatch.rows || []).forEach((row) => {
-      existingRows.set(row.id, row);
+      const entry = { batchId: existingBatch.id, row };
+      existingEntries.push(entry);
+
+      existingLookups.set(row.id, entry);
       if (row.legacyId) {
-        existingRows.set(row.legacyId, row);
+        existingLookups.set(row.legacyId, entry);
       }
       const identityKey = importRowIdentityKey(row);
       if (identityKey) {
-        existingRows.set(identityKey, row);
+        existingLookups.set(identityKey, entry);
       }
     });
   });
 
+  const usedRows = new Set();
+  const rowsToPrune = new Set();
+
   batch.rows = batch.rows.map((row) => {
-    const existing =
-      existingRows.get(row.id)
-      || existingRows.get(row.legacyId)
-      || existingRows.get(importRowIdentityKey(row));
-    if (!existing) {
+    const exactEntry = [
+      existingLookups.get(row.id),
+      row.legacyId ? existingLookups.get(row.legacyId) : null,
+      existingLookups.get(importRowIdentityKey(row))
+    ].find((entry) => entry && !usedRows.has(entry.row) && canReuseExistingImportRow(store, entry, row));
+
+    if (exactEntry) {
+      usedRows.add(exactEntry.row);
+      rowsToPrune.add(exactEntry.row);
+      return mergeIncomingImportRow(store, row, exactEntry, batch.id);
+    }
+
+    const movedEntry = findMovedImportCandidate(store, row, existingEntries, usedRows);
+    if (!movedEntry) {
       return row;
     }
 
-    return mergeImportRowState(row, existing);
+    usedRows.add(movedEntry.row);
+    rowsToPrune.add(movedEntry.row);
+    return mergeIncomingImportRow(store, row, movedEntry, batch.id);
   });
+
+  removeImportRows(store, rowsToPrune);
 
   store.imports = [batch, ...store.imports.filter((existingBatch) => existingBatch.id !== batch.id)];
   cleanupDuplicateImportRows(store);
