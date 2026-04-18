@@ -48,6 +48,7 @@ const state = {
   notesWorkspaceFocus: false,
   notesInkDrawing: false,
   notesInkLastPoint: null,
+  notesInkPointerId: null,
   visitAutosaveInFlight: false,
   activeView: "dashboard"
 };
@@ -2112,23 +2113,34 @@ function notesInkPoint(event, canvas = getNotesInkCanvas()) {
   };
 }
 
+function isHandwritingPointer(event) {
+  const pointerType = String(event?.pointerType || "").toLowerCase();
+  return pointerType === "pen" || pointerType === "mouse";
+}
+
 function endNotesInkStroke(event = null) {
   const canvas = getNotesInkCanvas();
-  if (canvas && event?.pointerId !== undefined && canvas.hasPointerCapture?.(event.pointerId)) {
+  if (
+    canvas &&
+    event?.pointerId !== undefined &&
+    event.pointerId === state.notesInkPointerId &&
+    canvas.hasPointerCapture?.(event.pointerId)
+  ) {
     canvas.releasePointerCapture(event.pointerId);
   }
 
-  if (!state.notesInkDrawing) {
+  if (!state.notesInkDrawing || (event?.pointerId !== undefined && event.pointerId !== state.notesInkPointerId)) {
     return;
   }
 
   state.notesInkDrawing = false;
   state.notesInkLastPoint = null;
+  state.notesInkPointerId = null;
   setVisitNotesInkData(exportNotesInkCanvas());
 }
 
 function startNotesInkStroke(event) {
-  if (getVisitNotesMode() !== "ink") {
+  if (getVisitNotesMode() !== "ink" || !isHandwritingPointer(event)) {
     return;
   }
 
@@ -2141,6 +2153,7 @@ function startNotesInkStroke(event) {
   const point = notesInkPoint(event, canvas);
   state.notesInkDrawing = true;
   state.notesInkLastPoint = point;
+  state.notesInkPointerId = event.pointerId;
   canvas.setPointerCapture?.(event.pointerId);
   context.beginPath();
   context.moveTo(point.x, point.y);
@@ -2150,7 +2163,12 @@ function startNotesInkStroke(event) {
 }
 
 function moveNotesInkStroke(event) {
-  if (!state.notesInkDrawing || getVisitNotesMode() !== "ink") {
+  if (
+    !state.notesInkDrawing ||
+    getVisitNotesMode() !== "ink" ||
+    !isHandwritingPointer(event) ||
+    event.pointerId !== state.notesInkPointerId
+  ) {
     return;
   }
 
