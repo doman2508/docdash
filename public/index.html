@@ -182,14 +182,20 @@
                   </div>
                 </div>
 
-              <div class="form-section">
-                <div class="field-label-row">
-                  <label for="visit-notes">Notatki z sesji</label>
-                  <button class="ghost note-workspace-trigger" id="open-notes-workspace" type="button">Tryb pisania</button>
+                <div class="form-section">
+                  <div class="field-label-row">
+                    <label for="visit-notes">Notatki z sesji</label>
+                    <button class="ghost note-workspace-trigger" id="open-notes-workspace" type="button">Tryb pisania</button>
+                  </div>
+                  <input id="visit-notes-mode" type="hidden" value="text" />
+                  <input id="visit-notes-ink" type="hidden" value="" />
+                  <textarea id="visit-notes" rows="5" readonly placeholder="Dotknij pola, aby otworzyc duzy obszar pisania."></textarea>
+                  <div class="visit-ink-preview" id="visit-ink-preview" hidden>
+                    <img id="visit-ink-preview-image" alt="Podglad notatki odrecznej" />
+                    <p class="field-hint" id="visit-ink-preview-copy">Notatka odreczna zapisana. Otworz tryb pisania, aby ja edytowac.</p>
+                  </div>
+                  <p class="field-hint" id="visit-notes-hint">Dotknij notatek albo przycisku, aby otworzyc duzy obszar roboczy pod pisanie rysikiem.</p>
                 </div>
-                <textarea id="visit-notes" rows="5" readonly placeholder="Dotknij pola, aby otworzyc duzy obszar pisania."></textarea>
-                <p class="field-hint">Dotknij notatek albo przycisku, aby otworzyc duzy obszar roboczy pod pisanie rysikiem.</p>
-              </div>
 
               <div class="form-section">
                 <label for="visit-summary">Podsumowanie wizyty</label>
@@ -500,9 +506,12 @@
           <div>
             <p class="panel-label">Tryb pisania</p>
             <h3 id="notes-workspace-title">Notatki z sesji</h3>
-            <p class="field-hint">Duzy obszar pod spokojne pisanie na tablecie. Tekst wraca od razu do tej wizyty.</p>
+            <p class="field-hint">Duzy obszar pod spokojne pisanie na tablecie. Mozesz pracowac tekstowo albo czysto odrecznie.</p>
           </div>
           <div class="inline-actions notes-workspace-toolbar">
+            <button class="ghost" id="notes-mode-text" type="button">Tekst</button>
+            <button class="ghost" id="notes-mode-ink" type="button">Odrecznie</button>
+            <button class="ghost" id="clear-notes-ink" type="button">Wyczysc atrament</button>
             <button class="ghost" id="notes-font-down" type="button" aria-label="Zmniejsz tekst">A-</button>
             <button class="ghost" id="notes-font-up" type="button" aria-label="Powieksz tekst">A+</button>
             <button class="ghost" id="toggle-notes-ruling" type="button">Linie</button>
@@ -513,16 +522,22 @@
 
         <div class="notes-workspace-meta" id="notes-workspace-meta"></div>
 
-        <textarea
-          id="notes-workspace-input"
-          class="notes-workspace-input"
-          rows="18"
-          autocapitalize="sentences"
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck="false"
-          placeholder="Tu wpisuj notatki z sesji..."
-        ></textarea>
+        <div class="notes-workspace-body">
+          <textarea
+            id="notes-workspace-input"
+            class="notes-workspace-input"
+            rows="18"
+            autocapitalize="sentences"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="Tu wpisuj notatki z sesji..."
+          ></textarea>
+          <div class="notes-ink-stage" id="notes-ink-stage" hidden>
+            <canvas id="notes-ink-canvas" aria-label="Notatki odręczne"></canvas>
+            <p class="field-hint notes-ink-copy">Tu zapisujesz notatki odręcznie bez zamiany na tekst maszynowy.</p>
+          </div>
+        </div>
       </div>
     </section>
 

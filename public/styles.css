@@ -303,6 +303,23 @@ p {
   white-space: nowrap;
 }
 
+.visit-ink-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 50, 24, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.visit-ink-preview img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
 .notes-workspace-toolbar {
   gap: 6px;
   align-items: center;
@@ -745,6 +762,15 @@ p {
   font-size: 0.86rem;
 }
 
+.notes-workspace-body {
+  min-height: 0;
+  display: grid;
+}
+
+.notes-workspace-body > * {
+  min-height: 0;
+}
+
 .notes-workspace-input {
   min-height: 100%;
   height: 100%;
@@ -779,6 +805,46 @@ p {
 
 .notes-workspace-shell.notes-focus .notes-workspace-header .field-hint {
   display: none;
+}
+
+.notes-ink-stage {
+  position: relative;
+  min-height: 100%;
+  height: 100%;
+  border-radius: 24px;
+  border: 1px solid rgba(78, 50, 24, 0.08);
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0) calc(2.1rem - 1px),
+      rgba(196, 91, 53, 0.11) calc(2.1rem - 1px),
+      rgba(196, 91, 53, 0.11) 2.1rem
+    ),
+    rgba(255, 255, 255, 0.92);
+  background-size: 100% 2.1rem;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.notes-ink-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.notes-ink-copy {
+  position: absolute;
+  left: 16px;
+  bottom: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(249, 245, 239, 0.94);
+  border: 1px solid rgba(78, 50, 24, 0.08);
+  pointer-events: none;
 }
 
 .patient-reconciliation-card {
@@ -1734,6 +1800,10 @@ input {
     padding: 18px 16px;
     font-size: 1rem;
     line-height: 1.55;
+  }
+
+  .visit-ink-preview img {
+    max-height: 180px;
   }
 
   .panel,

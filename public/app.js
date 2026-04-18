@@ -46,6 +46,8 @@ const state = {
   notesWorkspaceFontSize: 1.08,
   notesWorkspaceRuled: true,
   notesWorkspaceFocus: false,
+  notesInkDrawing: false,
+  notesInkLastPoint: null,
   visitAutosaveInFlight: false,
   activeView: "dashboard"
 };
@@ -1305,6 +1307,8 @@ function renderVisitForm() {
   badge.textContent = visit.status === "closed" ? "zamknieta" : "wymaga akcji";
   badge.className = `badge ${visit.status === "closed" ? "success" : "warning"}`;
 
+  document.getElementById("visit-notes-mode").value = visit.notesMode === "ink" || visit.notesInk ? "ink" : "text";
+  document.getElementById("visit-notes-ink").value = visit.notesInk || "";
   document.getElementById("visit-notes").value = visit.notes;
   document.getElementById("visit-summary").value = visit.summary;
   document.getElementById("visit-next-note").value = visit.nextVisit.note;
@@ -1318,6 +1322,69 @@ function renderVisitForm() {
   } else {
     updateNotesWorkspaceMeta(visit);
   }
+
+  renderVisitNotesPreview(visit);
+}
+
+function getVisitNotesMode(visit = getSelectedVisit()) {
+  const input = document.getElementById("visit-notes-mode");
+  const stored = input?.value || visit?.notesMode || (visit?.notesInk ? "ink" : "text");
+  return stored === "ink" ? "ink" : "text";
+}
+
+function getVisitNotesInkData(visit = getSelectedVisit()) {
+  const input = document.getElementById("visit-notes-ink");
+  return input?.value || visit?.notesInk || "";
+}
+
+function setVisitNotesMode(mode) {
+  const input = document.getElementById("visit-notes-mode");
+  if (input) {
+    input.value = mode === "ink" ? "ink" : "text";
+  }
+  renderVisitNotesPreview(getSelectedVisit());
+}
+
+function setVisitNotesInkData(dataUrl) {
+  const input = document.getElementById("visit-notes-ink");
+  if (input) {
+    input.value = dataUrl || "";
+  }
+  renderVisitNotesPreview(getSelectedVisit());
+}
+
+function renderVisitNotesPreview(visit = getSelectedVisit()) {
+  const textPreview = document.getElementById("visit-notes");
+  const inkPreview = document.getElementById("visit-ink-preview");
+  const inkImage = document.getElementById("visit-ink-preview-image");
+  const inkCopy = document.getElementById("visit-ink-preview-copy");
+  const notesHint = document.getElementById("visit-notes-hint");
+
+  if (!textPreview || !inkPreview || !inkImage || !inkCopy || !notesHint || !visit) {
+    return;
+  }
+
+  const mode = getVisitNotesMode(visit);
+  const inkData = getVisitNotesInkData(visit);
+
+  if (mode === "ink") {
+    textPreview.hidden = true;
+    inkPreview.hidden = false;
+    inkImage.hidden = !inkData;
+    if (inkData) {
+      inkImage.src = inkData;
+      inkCopy.textContent = "Notatka odręczna zapisana. Otwórz tryb pisania, aby dopisać kolejne rzeczy.";
+    } else {
+      inkImage.removeAttribute("src");
+      inkCopy.textContent = "Tryb odręczny jest aktywny. Otwórz tryb pisania, aby notować rysikiem bez zamiany na tekst.";
+    }
+    notesHint.textContent = "Ten wpis jest prowadzony odręcznie. Otwórz tryb pisania, aby pisać dalej rysikiem.";
+    return;
+  }
+
+  textPreview.hidden = false;
+  inkPreview.hidden = true;
+  notesHint.textContent = "Dotknij notatek albo przycisku, aby otworzyc duzy obszar roboczy pod pisanie rysikiem.";
 }
 
 function renderPatients() {
@@ -1802,6 +1869,8 @@ function syncNotesWorkspacePreview(value) {
   if (workspaceInput && state.notesWorkspaceOpen) {
     workspaceInput.value = value || "";
   }
+
+  renderVisitNotesPreview(getSelectedVisit());
 }
 
 function nextVisitChecklistEntry(nextVisit) {
@@ -1946,6 +2015,194 @@ function renderVisitCloseoutPreview() {
     .join("");
 }
 
+function getNotesInkCanvas() {
+  return document.getElementById("notes-ink-canvas");
+}
+
+function getNotesInkStage() {
+  return document.getElementById("notes-ink-stage");
+}
+
+function getNotesInkContext() {
+  const canvas = getNotesInkCanvas();
+  if (!canvas) {
+    return null;
+  }
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = 2.4;
+  context.strokeStyle = "rgba(50, 34, 20, 0.96)";
+  context.fillStyle = "rgba(50, 34, 20, 0.96)";
+  return context;
+}
+
+function drawNotesInkSnapshot(dataUrl = getVisitNotesInkData()) {
+  const canvas = getNotesInkCanvas();
+  const stage = getNotesInkStage();
+  if (!canvas || !stage || stage.hidden) {
+    return;
+  }
+
+  const deviceScale = Math.max(window.devicePixelRatio || 1, 1);
+  const width = Math.max(stage.clientWidth, 320);
+  const height = Math.max(stage.clientHeight, 320);
+
+  if (!width || !height) {
+    return;
+  }
+
+  canvas.width = Math.round(width * deviceScale);
+  canvas.height = Math.round(height * deviceScale);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  const context = getNotesInkContext();
+  if (!context) {
+    return;
+  }
+
+  context.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  if (!dataUrl) {
+    return;
+  }
+
+  const image = new Image();
+  image.onload = () => {
+    const ratio = Math.min(width / image.width, height / image.height);
+    const drawWidth = image.width * ratio;
+    const drawHeight = image.height * ratio;
+    const offsetX = (width - drawWidth) / 2;
+    const offsetY = (height - drawHeight) / 2;
+    context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+  };
+  image.src = dataUrl;
+}
+
+function exportNotesInkCanvas() {
+  const canvas = getNotesInkCanvas();
+  if (!canvas) {
+    return "";
+  }
+
+  return canvas.toDataURL("image/png");
+}
+
+function clearNotesInkCanvas() {
+  setVisitNotesInkData("");
+  drawNotesInkSnapshot("");
+}
+
+function notesInkPoint(event, canvas = getNotesInkCanvas()) {
+  if (!canvas) {
+    return { x: 0, y: 0 };
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  };
+}
+
+function endNotesInkStroke(event = null) {
+  const canvas = getNotesInkCanvas();
+  if (canvas && event?.pointerId !== undefined && canvas.hasPointerCapture?.(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId);
+  }
+
+  if (!state.notesInkDrawing) {
+    return;
+  }
+
+  state.notesInkDrawing = false;
+  state.notesInkLastPoint = null;
+  setVisitNotesInkData(exportNotesInkCanvas());
+}
+
+function startNotesInkStroke(event) {
+  if (getVisitNotesMode() !== "ink") {
+    return;
+  }
+
+  const canvas = getNotesInkCanvas();
+  const context = getNotesInkContext();
+  if (!canvas || !context) {
+    return;
+  }
+
+  const point = notesInkPoint(event, canvas);
+  state.notesInkDrawing = true;
+  state.notesInkLastPoint = point;
+  canvas.setPointerCapture?.(event.pointerId);
+  context.beginPath();
+  context.moveTo(point.x, point.y);
+  context.lineTo(point.x + 0.01, point.y + 0.01);
+  context.stroke();
+  event.preventDefault();
+}
+
+function moveNotesInkStroke(event) {
+  if (!state.notesInkDrawing || getVisitNotesMode() !== "ink") {
+    return;
+  }
+
+  const context = getNotesInkContext();
+  const canvas = getNotesInkCanvas();
+  if (!context || !canvas) {
+    return;
+  }
+
+  const point = notesInkPoint(event, canvas);
+  context.beginPath();
+  context.moveTo(state.notesInkLastPoint?.x ?? point.x, state.notesInkLastPoint?.y ?? point.y);
+  context.lineTo(point.x, point.y);
+  context.stroke();
+  state.notesInkLastPoint = point;
+  event.preventDefault();
+}
+
+function renderNotesWorkspaceMode() {
+  const mode = getVisitNotesMode();
+  const input = document.getElementById("notes-workspace-input");
+  const stage = getNotesInkStage();
+  const textButton = document.getElementById("notes-mode-text");
+  const inkButton = document.getElementById("notes-mode-ink");
+  const clearInkButton = document.getElementById("clear-notes-ink");
+
+  if (input) {
+    input.hidden = mode === "ink";
+  }
+
+  if (stage) {
+    stage.hidden = mode !== "ink";
+  }
+
+  if (textButton) {
+    textButton.classList.toggle("active", mode === "text");
+  }
+
+  if (inkButton) {
+    inkButton.classList.toggle("active", mode === "ink");
+  }
+
+  if (clearInkButton) {
+    clearInkButton.hidden = mode !== "ink";
+    clearInkButton.disabled = mode !== "ink" || !getVisitNotesInkData();
+  }
+
+  if (mode === "ink") {
+    window.requestAnimationFrame(() => drawNotesInkSnapshot());
+  }
+}
+
 function renderNotesWorkspaceControls() {
   const shell = document.querySelector(".notes-workspace-shell");
   const input = document.getElementById("notes-workspace-input");
@@ -1953,6 +2210,7 @@ function renderNotesWorkspaceControls() {
   const focusButton = document.getElementById("toggle-notes-focus");
   const fontDownButton = document.getElementById("notes-font-down");
   const fontUpButton = document.getElementById("notes-font-up");
+  const mode = getVisitNotesMode();
 
   if (!shell || !input) {
     return;
@@ -1967,6 +2225,7 @@ function renderNotesWorkspaceControls() {
   if (rulingButton) {
     rulingButton.classList.toggle("active", Boolean(state.notesWorkspaceRuled));
     rulingButton.textContent = state.notesWorkspaceRuled ? "Linie on" : "Linie off";
+    rulingButton.disabled = mode === "ink";
   }
 
   if (focusButton) {
@@ -1975,12 +2234,14 @@ function renderNotesWorkspaceControls() {
   }
 
   if (fontDownButton) {
-    fontDownButton.disabled = fontSize <= 0.96;
+    fontDownButton.disabled = mode === "ink" || fontSize <= 0.96;
   }
 
   if (fontUpButton) {
-    fontUpButton.disabled = fontSize >= 1.32;
+    fontUpButton.disabled = mode === "ink" || fontSize >= 1.32;
   }
+
+  renderNotesWorkspaceMode();
 }
 
 function updateNotesWorkspaceMeta(visit = getSelectedVisit()) {
@@ -2013,6 +2274,11 @@ function setNotesWorkspaceVisibility(isVisible) {
     state.notesWorkspaceOpen = true;
     renderNotesWorkspaceControls();
     window.requestAnimationFrame(() => {
+      if (getVisitNotesMode(visit) === "ink") {
+        drawNotesInkSnapshot(getVisitNotesInkData(visit));
+        return;
+      }
+
       workspaceInput.focus();
       const end = workspaceInput.value.length;
       workspaceInput.setSelectionRange(end, end);
@@ -2024,6 +2290,7 @@ function setNotesWorkspaceVisibility(isVisible) {
   overlay.hidden = true;
   document.body.classList.remove("workspace-open");
   state.notesWorkspaceOpen = false;
+  renderVisitNotesPreview(getSelectedVisit());
 }
 
 function reconciliationPrimaryTarget(match) {
@@ -3185,6 +3452,8 @@ function collectVisitPatch() {
   return {
     sessionOutcome: document.querySelector('[data-choice-group="session-outcome"].active').dataset.choiceValue,
     notes: document.getElementById("visit-notes").value,
+    notesMode: document.getElementById("visit-notes-mode")?.value || visit.notesMode || "text",
+    notesInk: document.getElementById("visit-notes-ink")?.value || visit.notesInk || "",
     summary: document.getElementById("visit-summary").value,
     nextVisit: {
       ...visit.nextVisit,
@@ -3314,6 +3583,8 @@ function hasVisitEditorChanges(visit, visitPatch, payment) {
   return (
     visit.sessionOutcome !== visitPatch.sessionOutcome ||
     String(visit.notes || "") !== String(visitPatch.notes || "") ||
+    String(visit.notesMode || (visit.notesInk ? "ink" : "text")) !== String(visitPatch.notesMode || "text") ||
+    String(visit.notesInk || "") !== String(visitPatch.notesInk || "") ||
     String(visit.summary || "") !== String(visitPatch.summary || "") ||
     visit.nextVisit.status !== visitPatch.nextVisit.status ||
     String(visit.nextVisit.plannedLabel || "") !== String(visitPatch.nextVisit.plannedLabel || "") ||
@@ -3501,19 +3772,24 @@ function attachActions() {
     };
 
     const notesPreview = document.getElementById("visit-notes");
-  const openNotesWorkspaceButton = document.getElementById("open-notes-workspace");
-  const closeNotesWorkspaceButton = document.getElementById("close-notes-workspace");
-  const notesWorkspaceInput = document.getElementById("notes-workspace-input");
-  const notesWorkspaceOverlay = document.getElementById("notes-workspace-overlay");
-  const notesFontDownButton = document.getElementById("notes-font-down");
-  const notesFontUpButton = document.getElementById("notes-font-up");
-  const notesRulingButton = document.getElementById("toggle-notes-ruling");
-  const notesFocusButton = document.getElementById("toggle-notes-focus");
+    const notesInkPreview = document.getElementById("visit-ink-preview");
+    const notesModeTextButton = document.getElementById("notes-mode-text");
+    const notesModeInkButton = document.getElementById("notes-mode-ink");
+    const clearNotesInkButton = document.getElementById("clear-notes-ink");
+    const openNotesWorkspaceButton = document.getElementById("open-notes-workspace");
+    const closeNotesWorkspaceButton = document.getElementById("close-notes-workspace");
+    const notesWorkspaceInput = document.getElementById("notes-workspace-input");
+    const notesWorkspaceOverlay = document.getElementById("notes-workspace-overlay");
+    const notesInkCanvas = getNotesInkCanvas();
+    const notesFontDownButton = document.getElementById("notes-font-down");
+    const notesFontUpButton = document.getElementById("notes-font-up");
+    const notesRulingButton = document.getElementById("toggle-notes-ruling");
+    const notesFocusButton = document.getElementById("toggle-notes-focus");
 
-  if (notesPreview) {
-    notesPreview.onpointerdown = (event) => {
-      event.preventDefault();
-      setNotesWorkspaceVisibility(true);
+    if (notesPreview) {
+      notesPreview.onpointerdown = (event) => {
+        event.preventDefault();
+        setNotesWorkspaceVisibility(true);
     };
     notesPreview.onkeydown = (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -3523,14 +3799,47 @@ function attachActions() {
     };
   }
 
-  if (openNotesWorkspaceButton) {
-    openNotesWorkspaceButton.onclick = () => setNotesWorkspaceVisibility(true);
-  }
+    if (openNotesWorkspaceButton) {
+      openNotesWorkspaceButton.onclick = () => setNotesWorkspaceVisibility(true);
+    }
 
-  if (notesFontDownButton) {
-    notesFontDownButton.onclick = () => {
-      state.notesWorkspaceFontSize = Math.max(0.96, Number((state.notesWorkspaceFontSize - 0.06).toFixed(2)));
-      renderNotesWorkspaceControls();
+    if (notesModeTextButton) {
+      notesModeTextButton.onclick = () => {
+        setVisitNotesMode("text");
+        renderNotesWorkspaceControls();
+        window.requestAnimationFrame(() => {
+          notesWorkspaceInput?.focus();
+          const end = notesWorkspaceInput?.value.length || 0;
+          notesWorkspaceInput?.setSelectionRange?.(end, end);
+        });
+      };
+    }
+
+    if (notesInkPreview) {
+      notesInkPreview.onpointerdown = (event) => {
+        event.preventDefault();
+        setNotesWorkspaceVisibility(true);
+      };
+    }
+
+    if (notesModeInkButton) {
+      notesModeInkButton.onclick = () => {
+        setVisitNotesMode("ink");
+        renderNotesWorkspaceControls();
+      };
+    }
+
+    if (clearNotesInkButton) {
+      clearNotesInkButton.onclick = () => {
+        clearNotesInkCanvas();
+        renderNotesWorkspaceControls();
+      };
+    }
+
+    if (notesFontDownButton) {
+      notesFontDownButton.onclick = () => {
+        state.notesWorkspaceFontSize = Math.max(0.96, Number((state.notesWorkspaceFontSize - 0.06).toFixed(2)));
+        renderNotesWorkspaceControls();
     };
   }
 
@@ -3561,26 +3870,39 @@ function attachActions() {
     };
   }
 
-  if (notesWorkspaceInput) {
-    notesWorkspaceInput.oninput = () => {
-      document.getElementById("visit-notes").value = notesWorkspaceInput.value;
-    };
-  }
+    if (notesWorkspaceInput) {
+      notesWorkspaceInput.oninput = () => {
+        document.getElementById("visit-notes").value = notesWorkspaceInput.value;
+      };
+    }
 
-  if (notesWorkspaceOverlay) {
-    notesWorkspaceOverlay.onclick = (event) => {
-      if (event.target === notesWorkspaceOverlay) {
-        setNotesWorkspaceVisibility(false);
+    if (notesInkCanvas) {
+      notesInkCanvas.onpointerdown = startNotesInkStroke;
+      notesInkCanvas.onpointermove = moveNotesInkStroke;
+      notesInkCanvas.onpointerup = endNotesInkStroke;
+      notesInkCanvas.onpointercancel = endNotesInkStroke;
+      notesInkCanvas.onpointerleave = endNotesInkStroke;
+    }
+
+    if (notesWorkspaceOverlay) {
+      notesWorkspaceOverlay.onclick = (event) => {
+        if (event.target === notesWorkspaceOverlay) {
+          setNotesWorkspaceVisibility(false);
       }
     };
   }
 
-  document.getElementById("ai-summary").onclick = () => {
-    const notes = document.getElementById("visit-notes").value.trim();
-    if (!notes) {
-      setSaveStatus("Brak notatek do podsumowania.", "error");
-      return;
-    }
+    document.getElementById("ai-summary").onclick = () => {
+      if (getVisitNotesMode() === "ink" && !document.getElementById("visit-notes").value.trim()) {
+        setSaveStatus("Podsumowanie AI dziala teraz tylko dla notatek tekstowych. Dla odrecznych jeszcze nie czytamy tresci.", "error");
+        return;
+      }
+
+      const notes = document.getElementById("visit-notes").value.trim();
+      if (!notes) {
+        setSaveStatus("Brak notatek do podsumowania.", "error");
+        return;
+      }
 
     const shortened = notes.length > 220 ? `${notes.slice(0, 220)}...` : notes;
     document.getElementById("visit-summary").value = `AI draft: ${shortened}`;
@@ -3850,6 +4172,12 @@ document.getElementById("close-data-tools")?.addEventListener("click", () => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.notesWorkspaceOpen) {
     setNotesWorkspaceVisibility(false);
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (state.notesWorkspaceOpen && getVisitNotesMode() === "ink") {
+    drawNotesInkSnapshot();
   }
 });
 

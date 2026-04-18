@@ -720,6 +720,8 @@ function buildManualVisit(payload) {
     status: "open",
     sessionOutcome,
     notes: "",
+    notesMode: "text",
+    notesInk: "",
     summary: "",
     closureChecklist: buildInitialChecklist(),
     nextVisit: {
@@ -771,6 +773,8 @@ function buildImportedVisit(importRow) {
     status: "open",
     sessionOutcome,
     notes: "",
+    notesMode: "text",
+    notesInk: "",
     summary: "",
     closureChecklist: [
       { label: "Wizyta przeniesiona z importu ZL", done: true },
