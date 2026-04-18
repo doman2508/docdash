@@ -988,8 +988,8 @@ p {
 
 .ledger-history-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(180px, 0.78fr) minmax(320px, 1.22fr);
+  gap: 8px;
   margin-top: 10px;
 }
 
@@ -1010,6 +1010,21 @@ p {
   border-radius: 9px;
   border: 1px solid rgba(78, 50, 24, 0.08);
   background: rgba(255, 255, 255, 0.66);
+}
+
+.ledger-history-grid > section:last-child .ledger-history-item {
+  padding: 4px 6px;
+  gap: 5px;
+}
+
+.ledger-history-grid > section:last-child .ledger-history-item strong {
+  font-size: 0.84rem;
+}
+
+.ledger-history-grid > section:last-child .ledger-history-item span,
+.ledger-history-grid > section:last-child .ledger-history-item small {
+  font-size: 0.66rem;
+  line-height: 1.1;
 }
 
 .ledger-history-item div {
