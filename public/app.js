@@ -590,7 +590,7 @@ function defaultVisitPaymentStatusLabel(status) {
 }
 
 function isGenericPaidStatusLabel(label) {
-  const value = normalizeSearchValue(label);
+  const value = normalizeSearchText(label);
   return !value || ["oplacone", "zaplacono", "potwierdzone", "paid"].includes(value);
 }
 
