@@ -2,19 +2,23 @@
 <html lang="pl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>DocDash</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">DD</div>
-          <div>
-            <p class="eyebrow">MVP prototype</p>
-            <h1>DocDash</h1>
+      <button class="shell-backdrop" id="shell-backdrop" type="button" hidden aria-label="Zamknij menu"></button>
+      <div class="shell">
+      <aside class="sidebar" id="app-sidebar">
+        <div class="sidebar-top">
+          <div class="brand">
+            <div class="brand-mark">DD</div>
+            <div>
+              <p class="eyebrow">MVP prototype</p>
+              <h1>DocDash</h1>
+            </div>
           </div>
+          <button class="ghost sidebar-close" id="sidebar-close" type="button">Zamknij</button>
         </div>
 
         <nav class="nav">
@@ -38,7 +42,11 @@
 
       <main class="content">
         <header class="hero">
-          <div>
+          <div class="hero-copy">
+            <div class="hero-mobile-row">
+              <button class="ghost mobile-nav-toggle" id="mobile-nav-toggle" type="button" aria-expanded="false" aria-controls="app-sidebar">Menu</button>
+              <span class="hero-mobile-brand">DocDash</span>
+            </div>
             <p class="eyebrow">Workflow specjalisty</p>
             <h2 id="view-title">Dzien pracy</h2>
             <p id="view-subtitle">

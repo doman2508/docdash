@@ -54,6 +54,7 @@ const state = {
   notesInkHistory: [],
   notesInkHistoryIndex: -1,
   notesInkPageIndex: 0,
+  sidebarOpen: false,
   visitAutosaveInFlight: false,
   activeView: "dashboard"
 };
@@ -66,6 +67,10 @@ const saveStatusEl = document.getElementById("save-status");
 const logoutButton = document.getElementById("logout-button");
 const dataToolsPanel = document.getElementById("data-tools-panel");
 const dataStoreFileInput = document.getElementById("data-store-file");
+const shellBackdropEl = document.getElementById("shell-backdrop");
+const sidebarEl = document.getElementById("app-sidebar");
+const mobileNavToggleEl = document.getElementById("mobile-nav-toggle");
+const sidebarCloseEl = document.getElementById("sidebar-close");
 
 function formatCurrency(value) {
   return `${Number(value || 0).toLocaleString("pl-PL")} zl`;
@@ -75,6 +80,42 @@ function formatSignedCurrency(value) {
   const number = Number(value || 0);
   const sign = number > 0 ? "+" : "";
   return `${sign}${number.toLocaleString("pl-PL")} zl`;
+}
+
+function isCompactShellViewport() {
+  return window.innerWidth <= 1080;
+}
+
+function setSidebarOpen(isOpen) {
+  const compact = isCompactShellViewport();
+  state.sidebarOpen = compact && Boolean(isOpen);
+  document.body.classList.toggle("sidebar-open", state.sidebarOpen);
+
+  if (shellBackdropEl) {
+    shellBackdropEl.hidden = !state.sidebarOpen;
+  }
+
+  if (mobileNavToggleEl) {
+    mobileNavToggleEl.setAttribute("aria-expanded", state.sidebarOpen ? "true" : "false");
+  }
+
+  if (sidebarEl) {
+    sidebarEl.setAttribute("aria-hidden", compact && !state.sidebarOpen ? "true" : "false");
+  }
+}
+
+function syncResponsiveShell() {
+  if (!isCompactShellViewport()) {
+    setSidebarOpen(false);
+    if (sidebarEl) {
+      sidebarEl.setAttribute("aria-hidden", "false");
+    }
+    return;
+  }
+
+  if (!state.sidebarOpen && shellBackdropEl) {
+    shellBackdropEl.hidden = true;
+  }
 }
 
 function sumAmounts(items) {
@@ -994,6 +1035,10 @@ function startReconciliationImportStatusTimers() {
 function setActiveView(viewKey) {
   if (viewKey !== "visit" && state.notesWorkspaceOpen) {
     setNotesWorkspaceVisibility(false);
+  }
+
+  if (isCompactShellViewport()) {
+    setSidebarOpen(false);
   }
 
   state.activeView = viewKey;
@@ -4585,6 +4630,7 @@ async function bootstrap() {
   state.selectedVisitId = getActiveDateWorkflowVisits()[0]?.id || state.data.visits[0]?.id || null;
   state.selectedImportId = state.data.imports?.[0]?.id || null;
   state.selectedPatientName = getSelectedVisit()?.patientName || state.data.visits[0]?.patientName || null;
+  syncResponsiveShell();
   renderAll();
   setActiveView("dashboard");
   setSaveStatus(`Dane zaladowane - ostatni zapis: ${state.data.meta.lastUpdated}`, "idle");
@@ -4608,13 +4654,32 @@ document.getElementById("close-data-tools")?.addEventListener("click", () => {
   setDataToolsPanelVisibility(false);
 });
 
+mobileNavToggleEl?.addEventListener("click", () => {
+  setSidebarOpen(!state.sidebarOpen);
+});
+
+sidebarCloseEl?.addEventListener("click", () => {
+  setSidebarOpen(false);
+});
+
+shellBackdropEl?.addEventListener("click", () => {
+  setSidebarOpen(false);
+});
+
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.sidebarOpen) {
+    setSidebarOpen(false);
+    return;
+  }
+
   if (event.key === "Escape" && state.notesWorkspaceOpen) {
     setNotesWorkspaceVisibility(false);
   }
 });
 
 window.addEventListener("resize", () => {
+  syncResponsiveShell();
+
   if (state.notesWorkspaceOpen && getVisitNotesMode() === "ink") {
     drawNotesInkSnapshot();
   }
