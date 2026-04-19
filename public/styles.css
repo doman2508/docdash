@@ -383,7 +383,7 @@ p {
 .notes-workspace-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 6px 5px;
   align-items: center;
   justify-content: flex-end;
 }
@@ -402,12 +402,14 @@ p {
 
 .notes-workspace-toolbar .ghost,
 .notes-workspace-toolbar .primary {
-  min-height: 38px;
+  min-height: 34px;
+  padding: 8px 12px;
+  font-size: 0.92rem;
 }
 
 .notes-ink-tool,
 .notes-ink-size {
-  min-width: 84px;
+  min-width: 74px;
 }
 
 .primary:hover,
@@ -798,19 +800,19 @@ p {
   z-index: 30;
   display: grid;
   place-items: center;
-  padding: 14px;
+  padding: 10px;
   background: rgba(38, 28, 18, 0.26);
 }
 
 .notes-workspace-shell {
   --notes-font-size: 1.08rem;
   --notes-line-height: 1.7;
-  width: min(1180px, calc(100vw - 28px));
-  min-height: calc(100vh - 28px);
-  max-height: calc(100vh - 28px);
+  width: min(1320px, calc(100vw - 20px));
+  min-height: calc(100vh - 20px);
+  max-height: calc(100vh - 20px);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 12px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
   padding: 16px;
   border-radius: 24px;
   border: 1px solid rgba(78, 50, 24, 0.12);
@@ -823,6 +825,10 @@ p {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+}
+
+.notes-workspace-header > div:first-child {
+  max-width: 420px;
 }
 
 .notes-workspace-meta {
@@ -839,14 +845,20 @@ p {
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .notes-workspace-pages span {
-  min-width: 108px;
+  min-width: 92px;
   text-align: center;
   color: var(--muted);
-  font-size: 0.84rem;
+  font-size: 0.8rem;
+}
+
+.notes-workspace-pages .ghost {
+  min-height: 34px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
 }
 
 .notes-workspace-body {
@@ -941,6 +953,68 @@ p {
   background: rgba(249, 245, 239, 0.94);
   border: 1px solid rgba(78, 50, 24, 0.08);
   pointer-events: none;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+@media (max-width: 1024px) {
+  .notes-workspace-shell {
+    width: calc(100vw - 16px);
+    min-height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
+    gap: 8px;
+    padding: 12px;
+    border-radius: 20px;
+  }
+
+  .notes-workspace-header {
+    gap: 8px;
+  }
+
+  .notes-workspace-header > div:first-child {
+    max-width: 340px;
+  }
+
+  .notes-workspace-header .field-hint {
+    margin-top: 2px;
+    font-size: 0.76rem;
+    line-height: 1.28;
+  }
+
+  .notes-workspace-meta {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
+
+  .notes-workspace-pages {
+    justify-content: flex-start;
+  }
+
+  .notes-ink-copy {
+    left: 10px;
+    bottom: 10px;
+    padding: 4px 8px;
+    font-size: 0.7rem;
+  }
+}
+
+@media (max-width: 1024px) and (orientation: portrait) {
+  .notes-workspace-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .notes-workspace-header > div:first-child {
+    max-width: none;
+  }
+
+  .notes-workspace-header .field-hint {
+    display: none;
+  }
+
+  .notes-workspace-toolbar {
+    justify-content: flex-start;
+  }
 }
 
 .patient-reconciliation-card {
@@ -1942,36 +2016,35 @@ input {
   }
 
   .notes-workspace-toolbar {
-    justify-content: stretch;
+    justify-content: flex-start;
   }
 
   .notes-workspace-toolbar > * {
-    flex: 1 1 auto;
-    justify-content: center;
+    flex: 0 1 auto;
   }
 
   .notes-workspace-overlay {
-    padding: 8px;
+    padding: 6px;
   }
 
   .notes-workspace-shell {
     width: 100%;
-    min-height: calc(100vh - 16px);
-    max-height: calc(100vh - 16px);
-    padding: 12px;
+    min-height: calc(100vh - 12px);
+    max-height: calc(100vh - 12px);
+    padding: 10px;
     border-radius: 18px;
   }
 
   .notes-workspace-pages {
-    justify-content: stretch;
+    justify-content: flex-start;
   }
 
   .notes-workspace-pages > * {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
   }
 
   .notes-workspace-input {
-    padding: 18px 16px;
+    padding: 16px 14px;
     font-size: 1rem;
     line-height: 1.55;
   }
