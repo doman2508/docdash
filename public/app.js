@@ -2470,6 +2470,25 @@ function isHandwritingPointer(event) {
   return pointerType === "pen" || pointerType === "mouse";
 }
 
+function isPointerStillPressed(event) {
+  if (!event) {
+    return false;
+  }
+
+  const buttons = Number(event.buttons);
+  const pressure = Number(event.pressure);
+  return buttons > 0 || pressure > 0;
+}
+
+function suppressNotesInkDefaultEvent(event) {
+  if (getVisitNotesMode() !== "ink" || !event) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function endNotesInkStroke(event = null) {
   const canvas = getNotesInkCanvas();
   if (
@@ -2491,6 +2510,9 @@ function endNotesInkStroke(event = null) {
   const snapshot = exportNotesInkCanvas();
   setActiveNotesInkPageData(snapshot);
   recordNotesInkHistorySnapshot(snapshot);
+  if (event) {
+    event.preventDefault();
+  }
 }
 
 function startNotesInkStroke(event) {
@@ -2515,6 +2537,16 @@ function startNotesInkStroke(event) {
 }
 
 function moveNotesInkStroke(event) {
+  if (
+    !state.notesInkDrawing &&
+    getVisitNotesMode() === "ink" &&
+    isHandwritingPointer(event) &&
+    isPointerStillPressed(event)
+  ) {
+    startNotesInkStroke(event);
+    return;
+  }
+
   if (
     !state.notesInkDrawing ||
     getVisitNotesMode() !== "ink" ||
@@ -4245,6 +4277,7 @@ function attachActions() {
     const notesWorkspaceInput = document.getElementById("notes-workspace-input");
     const notesWorkspaceOverlay = document.getElementById("notes-workspace-overlay");
     const notesInkCanvas = getNotesInkCanvas();
+    const notesInkStage = getNotesInkStage();
     const notesPagePrevButton = document.getElementById("notes-page-prev");
     const notesPageNextButton = document.getElementById("notes-page-next");
     const notesPageAddButton = document.getElementById("notes-page-add");
@@ -4417,6 +4450,19 @@ function attachActions() {
       notesInkCanvas.onpointerup = endNotesInkStroke;
       notesInkCanvas.onpointercancel = endNotesInkStroke;
       notesInkCanvas.onlostpointercapture = endNotesInkStroke;
+      notesInkCanvas.oncontextmenu = suppressNotesInkDefaultEvent;
+      notesInkCanvas.onselectstart = suppressNotesInkDefaultEvent;
+      notesInkCanvas.ondragstart = suppressNotesInkDefaultEvent;
+    }
+
+    if (notesInkStage) {
+      notesInkStage.oncontextmenu = suppressNotesInkDefaultEvent;
+      if (!notesInkStage.dataset.inkGuardsBound) {
+        ["touchstart", "touchmove", "gesturestart", "gesturechange", "gestureend"].forEach((eventName) => {
+          notesInkStage.addEventListener(eventName, suppressNotesInkDefaultEvent, { passive: false });
+        });
+        notesInkStage.dataset.inkGuardsBound = "true";
+      }
     }
 
     if (notesWorkspaceOverlay) {
