@@ -101,7 +101,11 @@
           <div class="create-visit-grid">
             <div class="form-section">
               <label for="create-patient-name">Pacjent</label>
-              <input id="create-patient-name" type="text" />
+              <input id="create-patient-name" type="text" list="create-patient-suggestions" autocomplete="off" />
+              <datalist id="create-patient-suggestions"></datalist>
+              <p class="field-hint" id="create-patient-hint">
+                Zacznij wpisywac, a podpowiemy pacjenta z bazy. Nowa osoba zapisze sie po dodaniu wizyty.
+              </p>
             </div>
             <div class="form-section">
               <label for="create-date-label">Data</label>

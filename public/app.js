@@ -967,6 +967,46 @@ function getFilteredPatients() {
   });
 }
 
+function resolvePatientNameInput(rawName) {
+  const typedName = String(rawName || "").trim();
+  const normalizedTypedName = normalizeSearchText(typedName).trim();
+  if (!normalizedTypedName) {
+    return "";
+  }
+
+  const existingPatient = getPatients().find((patient) => (
+    normalizeSearchText(patient.patientName).trim() === normalizedTypedName
+  ));
+
+  return existingPatient?.patientName || typedName;
+}
+
+function renderCreatePatientSuggestions() {
+  const list = document.getElementById("create-patient-suggestions");
+  const hint = document.getElementById("create-patient-hint");
+  if (!list) {
+    return;
+  }
+
+  const patientNames = Array.from(new Set(
+    getPatients()
+      .map((patient) => String(patient.patientName || "").trim())
+      .filter(Boolean)
+  )).sort((left, right) => left.localeCompare(right, "pl"));
+
+  list.replaceChildren(...patientNames.map((patientName) => {
+    const option = document.createElement("option");
+    option.value = patientName;
+    return option;
+  }));
+
+  if (hint) {
+    hint.textContent = patientNames.length
+      ? `Zacznij wpisywac, a podpowiemy pacjenta z bazy (${patientNames.length}). Nowa osoba zapisze sie po dodaniu wizyty.`
+      : "Wpisz pelne imie i nazwisko. Pierwsza dodana wizyta utworzy karte pacjenta w bazie.";
+  }
+}
+
 function getImports() {
   return state.data.imports || [];
 }
@@ -3818,7 +3858,7 @@ async function confirmConfidentPaymentMatches() {
 
 async function createManualVisit() {
   const payload = {
-    patientName: document.getElementById("create-patient-name").value.trim(),
+    patientName: resolvePatientNameInput(document.getElementById("create-patient-name").value),
     dateLabel: document.getElementById("create-date-label").value.trim(),
     time: document.getElementById("create-time").value.trim() || "brak godziny",
     serviceName: document.getElementById("create-service-name").value.trim(),
@@ -4097,6 +4137,7 @@ function attachActions() {
   const openCreateButton = document.getElementById("open-create-visit");
   const saveCreateButton = document.getElementById("save-create-visit");
   const cancelCreateButton = document.getElementById("cancel-create-visit");
+  const createPatientInput = document.getElementById("create-patient-name");
   const toggleFollowupButton = document.getElementById("toggle-followup");
 
   if (openCreateButton) {
@@ -4111,6 +4152,16 @@ function attachActions() {
 
   if (cancelCreateButton) {
     cancelCreateButton.onclick = () => setCreateVisitPanelVisibility(false);
+  }
+
+  if (createPatientInput) {
+    createPatientInput.onchange = () => {
+      createPatientInput.value = resolvePatientNameInput(createPatientInput.value);
+    };
+
+    createPatientInput.onblur = () => {
+      createPatientInput.value = resolvePatientNameInput(createPatientInput.value);
+    };
   }
 
   if (toggleFollowupButton) {
@@ -4614,6 +4665,7 @@ function renderAll() {
   renderDashboard();
   renderImports();
   renderPatients();
+  renderCreatePatientSuggestions();
   renderVisitForm();
   renderBilling();
   renderStats();
