@@ -511,7 +511,13 @@
           <div class="inline-actions notes-workspace-toolbar">
             <button class="ghost" id="notes-mode-text" type="button">Tekst</button>
             <button class="ghost" id="notes-mode-ink" type="button">Odrecznie</button>
-            <button class="ghost" id="clear-notes-ink" type="button">Wyczysc atrament</button>
+            <button class="ghost notes-ink-tool" id="notes-ink-pen" type="button">Pioro</button>
+            <button class="ghost notes-ink-tool" id="notes-ink-eraser" type="button">Gumka</button>
+            <button class="ghost notes-ink-size" id="notes-ink-size-thin" type="button">Cienka</button>
+            <button class="ghost notes-ink-size" id="notes-ink-size-medium" type="button">Srednia</button>
+            <button class="ghost notes-ink-size" id="notes-ink-size-bold" type="button">Gruba</button>
+            <button class="ghost" id="undo-notes-ink" type="button">Cofnij</button>
+            <button class="ghost" id="clear-notes-ink" type="button">Wyczysc strone</button>
             <button class="ghost" id="notes-font-down" type="button" aria-label="Zmniejsz tekst">A-</button>
             <button class="ghost" id="notes-font-up" type="button" aria-label="Powieksz tekst">A+</button>
             <button class="ghost" id="toggle-notes-ruling" type="button">Linie</button>
@@ -521,6 +527,13 @@
         </div>
 
         <div class="notes-workspace-meta" id="notes-workspace-meta"></div>
+        <div class="notes-workspace-pages" id="notes-workspace-pages" hidden>
+          <button class="ghost" id="notes-page-prev" type="button">Poprzednia</button>
+          <span id="notes-page-label">Strona 1 z 1</span>
+          <button class="ghost" id="notes-page-next" type="button">Nastepna</button>
+          <button class="ghost" id="notes-page-add" type="button">Nowa strona</button>
+          <button class="ghost" id="notes-page-remove" type="button">Usun strone</button>
+        </div>
 
         <div class="notes-workspace-body">
           <textarea
@@ -535,7 +548,7 @@
           ></textarea>
           <div class="notes-ink-stage" id="notes-ink-stage" hidden>
             <canvas id="notes-ink-canvas" aria-label="Notatki odręczne"></canvas>
-            <p class="field-hint notes-ink-copy">Na tablecie pisze tylko rysik. Dlon i nadgarstek sa ignorowane.</p>
+            <p class="field-hint notes-ink-copy">Pisze tylko rysik. Dlon i nadgarstek sa ignorowane.</p>
           </div>
         </div>
       </div>
