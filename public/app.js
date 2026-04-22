@@ -3,6 +3,10 @@ const views = {
     title: "Dzien pracy",
     subtitle: "Jedno miejsce do ogarniania sesji, zaleglosci i kolejnych krokow."
   },
+  calendar: {
+    title: "Kalendarz",
+    subtitle: "Tygodniowy widok wizyt, wpisow z ZL i szybkiego wejscia do sesji."
+  },
   imports: {
     title: "Importy",
     subtitle: "ZL i bank jako wejscie danych do DocDash oraz historia ostatnich batchy."
@@ -32,6 +36,7 @@ const state = {
   selectedPatientName: null,
   activeDateKey: null,
   patientSearch: "",
+  calendarSearch: "",
   showDayFollowup: false,
   showImportArchive: false,
   reconciliationLedger: null,
@@ -285,6 +290,143 @@ function shiftDateKey(label, deltaDays) {
   const parsed = parseDateLabel(label) || parseDateLabel(getCurrentDateKey()) || new Date();
   parsed.setDate(parsed.getDate() + Number(deltaDays || 0));
   return formatDateKey(parsed);
+}
+
+const CALENDAR_WEEKDAY_LABELS = ["Pon", "Wt", "Sr", "Czw", "Pt", "Sob", "Ndz"];
+const CALENDAR_MONTH_LABELS = [
+  "stycznia",
+  "lutego",
+  "marca",
+  "kwietnia",
+  "maja",
+  "czerwca",
+  "lipca",
+  "sierpnia",
+  "wrzesnia",
+  "pazdziernika",
+  "listopada",
+  "grudnia"
+];
+const CALENDAR_DEFAULT_DURATION_MINUTES = 50;
+const CALENDAR_MIN_HOUR = 7;
+const CALENDAR_MAX_HOUR = 21;
+const CALENDAR_HOUR_HEIGHT = 72;
+
+function getWeekStartDate(dateKey = state.activeDateKey) {
+  const date = parseDateLabel(dateKey) || parseDateLabel(getCurrentDateKey()) || new Date();
+  const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const offset = (normalized.getDay() + 6) % 7;
+  normalized.setDate(normalized.getDate() - offset);
+  return normalized;
+}
+
+function getWeekDates(dateKey = state.activeDateKey) {
+  const start = getWeekStartDate(dateKey);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index);
+    return {
+      date,
+      key: formatDateKey(date),
+      dayLabel: CALENDAR_WEEKDAY_LABELS[index],
+      dayNumber: date.getDate()
+    };
+  });
+}
+
+function formatWeekRangeLabel(weekDates) {
+  if (!weekDates?.length) {
+    return "Tydzien";
+  }
+
+  const first = weekDates[0].date;
+  const last = weekDates[weekDates.length - 1].date;
+  const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear();
+  const firstMonth = CALENDAR_MONTH_LABELS[first.getMonth()];
+  const lastMonth = CALENDAR_MONTH_LABELS[last.getMonth()];
+
+  if (sameMonth) {
+    return `${first.getDate()} - ${last.getDate()} ${firstMonth} ${first.getFullYear()}`;
+  }
+
+  return `${first.getDate()} ${firstMonth} - ${last.getDate()} ${lastMonth} ${last.getFullYear()}`;
+}
+
+function formatCalendarTimeRange(startMinute, endMinute) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const startHours = Math.floor(startMinute / 60);
+  const startMinutes = startMinute % 60;
+  const endHours = Math.floor(endMinute / 60);
+  const endMinutes = endMinute % 60;
+  return `${pad(startHours)}:${pad(startMinutes)} - ${pad(endHours)}:${pad(endMinutes)}`;
+}
+
+function inferCalendarDurationMinutes(serviceName = "") {
+  const normalized = normalizeSearchText(serviceName);
+  if (normalized.includes("superwiz")) {
+    return 50;
+  }
+
+  if (normalized.includes("diagnoz") || normalized.includes("konsultacja")) {
+    return 50;
+  }
+
+  return CALENDAR_DEFAULT_DURATION_MINUTES;
+}
+
+function getCalendarEventToneClass({ kind = "visit", settled = false, blockedByOutcome = false, ignored = false }) {
+  if (kind === "import") {
+    return "is-import";
+  }
+
+  if (blockedByOutcome || ignored) {
+    return "is-muted";
+  }
+
+  return settled ? "is-settled" : "is-pending";
+}
+
+function layoutCalendarDayEvents(events) {
+  const sortedEvents = [...events].sort((left, right) => (
+    left.startMinute - right.startMinute ||
+    left.endMinute - right.endMinute ||
+    String(left.patientName || "").localeCompare(String(right.patientName || ""))
+  ));
+
+  const finalizeCluster = (cluster, laneCount) => {
+    cluster.forEach((event) => {
+      event.laneCount = Math.max(laneCount, 1);
+    });
+  };
+
+  let active = [];
+  let cluster = [];
+  let clusterLaneCount = 1;
+
+  sortedEvents.forEach((event) => {
+    active = active.filter((item) => item.endMinute > event.startMinute);
+    if (!active.length && cluster.length) {
+      finalizeCluster(cluster, clusterLaneCount);
+      cluster = [];
+      clusterLaneCount = 1;
+    }
+
+    const usedLanes = new Set(active.map((item) => item.laneIndex));
+    let laneIndex = 0;
+    while (usedLanes.has(laneIndex)) {
+      laneIndex += 1;
+    }
+
+    event.laneIndex = laneIndex;
+    active.push(event);
+    cluster.push(event);
+    clusterLaneCount = Math.max(clusterLaneCount, ...active.map((item) => item.laneIndex + 1));
+  });
+
+  if (cluster.length) {
+    finalizeCluster(cluster, clusterLaneCount);
+  }
+
+  return sortedEvents;
 }
 
 function dateDistanceBetween(left, right) {
@@ -1308,6 +1450,238 @@ function renderDashboard() {
     state.activeDateKey = getCurrentDateKey();
     renderAll();
   });
+}
+
+function renderCalendar() {
+  const weekShell = document.getElementById("calendar-week-shell");
+  const rangeLabel = document.getElementById("calendar-range-label");
+  const searchInput = document.getElementById("calendar-search");
+  const meta = document.getElementById("calendar-meta");
+  const unscheduledPanel = document.getElementById("calendar-unscheduled-panel");
+  const unscheduledList = document.getElementById("calendar-unscheduled-list");
+
+  if (!weekShell || !rangeLabel || !searchInput || !meta || !unscheduledPanel || !unscheduledList) {
+    return;
+  }
+
+  const weekDates = getWeekDates(state.activeDateKey);
+  const weekKeys = new Set(weekDates.map((item) => item.key));
+  const selectedDateKey = normalizeDateKey(state.activeDateKey) || normalizeDateKey(getCurrentDateKey());
+  const todayKey = normalizeDateKey(getCurrentDateKey());
+  const normalizedSearch = normalizeSearchText(state.calendarSearch).trim();
+  const matchesSearch = (patientName, serviceName) => (
+    !normalizedSearch ||
+    normalizeSearchText(`${patientName} ${serviceName}`).includes(normalizedSearch)
+  );
+
+  const timedEventsByDate = new Map(weekDates.map((item) => [item.key, []]));
+  const unscheduledEvents = [];
+  let workflowCount = 0;
+  let importCount = 0;
+
+  state.data.visits
+    .filter((visit) => weekKeys.has(normalizeDateKey(visit.dateLabel)))
+    .filter((visit) => matchesSearch(visit.patientName, visit.serviceName))
+    .forEach((visit) => {
+      workflowCount += 1;
+      const paymentMeta = getVisitPaymentMeta(visit);
+      const outcomeMeta = getSessionOutcomeMeta(visit.sessionOutcome, visit.dateLabel);
+      const startMinute = getTimeSortValue(visit.time);
+      const duration = inferCalendarDurationMinutes(visit.serviceName);
+      const event = {
+        id: `visit-${visit.id}`,
+        kind: "visit",
+        patientName: visit.patientName,
+        serviceName: visit.serviceName,
+        dateKey: normalizeDateKey(visit.dateLabel),
+        dateLabel: visit.dateLabel,
+        time: visit.time,
+        startMinute,
+        endMinute: startMinute + duration,
+        displayTime: startMinute < 9999 ? formatCalendarTimeRange(startMinute, startMinute + duration) : "bez godziny",
+        amount: Number(visit.payment?.amount || 0),
+        toneClass: getCalendarEventToneClass({
+          kind: "visit",
+          settled: paymentMeta.settled,
+          blockedByOutcome: paymentMeta.blockedByOutcome,
+          ignored: paymentMeta.ignored
+        }),
+        badges: [outcomeMeta.label, paymentMeta.label],
+        visitId: visit.id
+      };
+
+      if (startMinute < 9999) {
+        timedEventsByDate.get(event.dateKey)?.push(event);
+      } else {
+        unscheduledEvents.push(event);
+      }
+    });
+
+  getImports()
+    .flatMap((batch) => (batch.rows || []).map((row) => ({ ...row, importId: batch.id })))
+    .filter((row) => weekKeys.has(normalizeDateKey(row.dateLabel)))
+    .filter((row) => !row.processed && !row.linkedVisitId)
+    .filter((row) => matchesSearch(row.patientName, row.serviceName))
+    .forEach((row) => {
+      importCount += 1;
+      const outcomeMeta = getImportRowOutcomeMeta(row);
+      const paymentMeta = getImportRowPaymentMeta(row);
+      const startMinute = getTimeSortValue(row.time);
+      const duration = inferCalendarDurationMinutes(row.serviceName);
+      const toneClass = !outcomeMeta.chargeable
+        ? "is-muted"
+        : paymentMeta.settled
+          ? "is-settled"
+          : "is-import";
+      const event = {
+        id: `import-${row.importId}-${row.id}`,
+        kind: "import",
+        patientName: row.patientName,
+        serviceName: row.serviceName || "konsultacja",
+        dateKey: normalizeDateKey(row.dateLabel),
+        dateLabel: row.dateLabel,
+        time: row.time || "",
+        startMinute,
+        endMinute: startMinute + duration,
+        displayTime: startMinute < 9999 ? formatCalendarTimeRange(startMinute, startMinute + duration) : "bez godziny",
+        amount: Number(row.amount || 0),
+        toneClass,
+        badges: ["ZL", outcomeMeta.label, paymentMeta.label],
+        importId: row.importId,
+        rowId: row.id
+      };
+
+      if (startMinute < 9999) {
+        timedEventsByDate.get(event.dateKey)?.push(event);
+      } else {
+        unscheduledEvents.push(event);
+      }
+    });
+
+  const allTimedEvents = Array.from(timedEventsByDate.values()).flat();
+  const earliestStart = allTimedEvents.length
+    ? Math.min(...allTimedEvents.map((event) => event.startMinute))
+    : 8 * 60;
+  const latestEnd = allTimedEvents.length
+    ? Math.max(...allTimedEvents.map((event) => event.endMinute))
+    : 18 * 60;
+  const startHour = Math.max(CALENDAR_MIN_HOUR, Math.floor((earliestStart - 30) / 60));
+  const endHour = Math.max(startHour + 1, Math.min(CALENDAR_MAX_HOUR, Math.ceil((latestEnd + 30) / 60)));
+  const dayStartMinute = startHour * 60;
+  const dayHeight = (endHour - startHour) * CALENDAR_HOUR_HEIGHT;
+  const timeLabels = [];
+
+  for (let minute = dayStartMinute; minute <= endHour * 60; minute += 30) {
+    timeLabels.push({
+      minute,
+      label: `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
+      top: ((minute - dayStartMinute) / 60) * CALENDAR_HOUR_HEIGHT
+    });
+  }
+
+  rangeLabel.textContent = formatWeekRangeLabel(weekDates);
+  searchInput.value = state.calendarSearch;
+  meta.textContent = `${workflowCount} sesji, ${importCount} wpisow z ZL${normalizedSearch ? " po filtrowaniu" : ""}`;
+
+  if (!allTimedEvents.length && !unscheduledEvents.length) {
+    weekShell.innerHTML = `<div class="empty-state">W tym tygodniu nie ma jeszcze zadnych wizyt ani wpisow z ZL dla tego filtra.</div>`;
+    unscheduledPanel.hidden = true;
+    unscheduledList.innerHTML = "";
+    return;
+  }
+
+  weekDates.forEach((day) => {
+    const dayEvents = timedEventsByDate.get(day.key) || [];
+    layoutCalendarDayEvents(dayEvents);
+  });
+
+  weekShell.innerHTML = `
+    <div class="calendar-week-grid" style="--calendar-hour-height: ${CALENDAR_HOUR_HEIGHT}px;">
+      <div class="calendar-week-corner"></div>
+      ${weekDates.map((day) => `
+        <button
+          class="calendar-day-head ${day.key === selectedDateKey ? "is-selected" : ""} ${day.key === todayKey ? "is-today" : ""}"
+          type="button"
+          data-calendar-date="${day.key}"
+        >
+          <span>${day.dayLabel}</span>
+          <strong>${day.dayNumber}</strong>
+        </button>
+      `).join("")}
+
+      <div class="calendar-time-column" style="height: ${dayHeight}px;">
+        ${timeLabels.map((label) => `
+          <span class="calendar-time-label ${label.minute % 60 === 0 ? "hour-mark" : ""}" style="top: ${label.top}px;">
+            ${label.label}
+          </span>
+        `).join("")}
+      </div>
+
+      ${weekDates.map((day) => {
+        const dayEvents = timedEventsByDate.get(day.key) || [];
+        return `
+          <div
+            class="calendar-day-column ${day.key === selectedDateKey ? "is-selected" : ""} ${day.key === todayKey ? "is-today" : ""}"
+            style="height: ${dayHeight}px;"
+          >
+            ${dayEvents.length
+              ? dayEvents.map((event) => {
+                const top = ((event.startMinute - dayStartMinute) / 60) * CALENDAR_HOUR_HEIGHT;
+                const height = Math.max(54, ((event.endMinute - event.startMinute) / 60) * CALENDAR_HOUR_HEIGHT - 6);
+                const attributes = event.kind === "visit"
+                  ? `data-calendar-open-visit="${event.visitId}"`
+                  : `data-calendar-promote="${event.rowId}" data-import-id="${event.importId}"`;
+
+                return `
+                  <button
+                    class="calendar-event ${event.toneClass}"
+                    type="button"
+                    style="top:${top}px;height:${height}px;--calendar-event-columns:${event.laneCount || 1};--calendar-event-lane:${event.laneIndex || 0};"
+                    ${attributes}
+                    title="${event.kind === "visit" ? "Otworz sesje" : "Przejmij wpis z ZL do sesji"}"
+                  >
+                    <span class="calendar-event-time">${event.displayTime}</span>
+                    <strong>${event.patientName}</strong>
+                    <span class="calendar-event-service">${event.serviceName}</span>
+                    <div class="calendar-event-badges">
+                      ${event.badges.map((badge) => `<span>${badge}</span>`).join("")}
+                    </div>
+                  </button>
+                `;
+              }).join("")
+              : `<div class="calendar-day-empty">Brak wizyt</div>`}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  const sortedUnscheduled = [...unscheduledEvents].sort((left, right) => (
+    (getDateSortValue(left.dateLabel) || 0) - (getDateSortValue(right.dateLabel) || 0) ||
+    String(left.patientName || "").localeCompare(String(right.patientName || ""))
+  ));
+
+  unscheduledPanel.hidden = !sortedUnscheduled.length;
+  unscheduledList.innerHTML = sortedUnscheduled.length
+    ? sortedUnscheduled.map((event) => {
+      const attributes = event.kind === "visit"
+        ? `data-calendar-open-visit="${event.visitId}"`
+        : `data-calendar-promote="${event.rowId}" data-import-id="${event.importId}"`;
+
+      return `
+        <button class="calendar-unscheduled-item ${event.toneClass}" type="button" ${attributes}>
+          <div>
+            <strong>${event.patientName}</strong>
+            <span>${event.dateLabel} - ${event.serviceName}</span>
+          </div>
+          <div class="calendar-unscheduled-meta">
+            <span>${formatCurrency(event.amount)}</span>
+            <small>${event.kind === "visit" ? "otworz sesje" : "przejmij z ZL"}</small>
+          </div>
+        </button>
+      `;
+    }).join("")
+    : "";
 }
 
 function buildInboxItems(dateKey = null) {
@@ -4204,6 +4578,63 @@ function attachActions() {
     };
   }
 
+  const calendarPrevWeekButton = document.getElementById("calendar-prev-week");
+  if (calendarPrevWeekButton) {
+    calendarPrevWeekButton.onclick = () => {
+      state.activeDateKey = shiftDateKey(state.activeDateKey, -7);
+      renderAll();
+      setActiveView("calendar");
+    };
+  }
+
+  const calendarNextWeekButton = document.getElementById("calendar-next-week");
+  if (calendarNextWeekButton) {
+    calendarNextWeekButton.onclick = () => {
+      state.activeDateKey = shiftDateKey(state.activeDateKey, 7);
+      renderAll();
+      setActiveView("calendar");
+    };
+  }
+
+  const calendarTodayButton = document.getElementById("calendar-today");
+  if (calendarTodayButton) {
+    calendarTodayButton.onclick = () => {
+      state.activeDateKey = getCurrentDateKey();
+      renderAll();
+      setActiveView("calendar");
+    };
+  }
+
+  const calendarSearchInput = document.getElementById("calendar-search");
+  if (calendarSearchInput) {
+    calendarSearchInput.oninput = (event) => {
+      state.calendarSearch = event.target.value;
+      renderCalendar();
+      attachActions();
+      setActiveView("calendar");
+    };
+  }
+
+  document.querySelectorAll("[data-calendar-date]").forEach((button) => {
+    button.onclick = () => {
+      state.activeDateKey = button.dataset.calendarDate;
+      renderAll();
+      setActiveView("calendar");
+    };
+  });
+
+  document.querySelectorAll("[data-calendar-open-visit]").forEach((button) => {
+    button.onclick = async () => {
+      await openVisitById(button.dataset.calendarOpenVisit);
+    };
+  });
+
+  document.querySelectorAll("[data-calendar-promote]").forEach((button) => {
+    button.onclick = async () => {
+      await promoteImportRow(button.dataset.importId, button.dataset.calendarPromote);
+    };
+  });
+
   document.getElementById("save-visit").onclick = async () => {
     const { visit, visitPatch, paymentPatch, payload } = buildVisitSavePayload();
     await saveVisit(
@@ -4709,6 +5140,7 @@ function attachActions() {
 
 function renderAll() {
   renderDashboard();
+  renderCalendar();
   renderImports();
   renderPatients();
   renderCreatePatientSuggestions();

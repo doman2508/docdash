@@ -23,6 +23,7 @@
 
         <nav class="nav">
           <button class="nav-link active" data-view="dashboard">Dzien</button>
+          <button class="nav-link" data-view="calendar">Kalendarz</button>
           <button class="nav-link" data-view="imports">Importy</button>
           <button class="nav-link" data-view="patients">Pacjenci</button>
           <button class="nav-link" data-view="visit">Sesja</button>
@@ -177,6 +178,49 @@
                 <div class="inbox-list" id="inbox-list"></div>
               </section>
             </div>
+          </section>
+        </section>
+
+        <section class="view" id="calendar-view">
+          <section class="panel calendar-panel">
+            <div class="calendar-toolbar">
+              <div class="calendar-toolbar-main">
+                <div class="calendar-week-actions">
+                  <button class="ghost" id="calendar-today" type="button">Obecny tydzien</button>
+                  <button class="ghost calendar-nav-button" id="calendar-prev-week" type="button" aria-label="Poprzedni tydzien">‹</button>
+                  <button class="ghost calendar-nav-button" id="calendar-next-week" type="button" aria-label="Nastepny tydzien">›</button>
+                </div>
+                <div>
+                  <p class="panel-label">Kalendarz tygodniowy</p>
+                  <h3 id="calendar-range-label">Tydzien</h3>
+                </div>
+              </div>
+              <div class="calendar-toolbar-side">
+                <input id="calendar-search" type="search" placeholder="Wyszukaj pacjenta..." autocomplete="off" />
+                <span id="calendar-meta"></span>
+              </div>
+            </div>
+
+            <div class="calendar-legend">
+              <span class="calendar-legend-chip is-settled">rozliczone / potwierdzone</span>
+              <span class="calendar-legend-chip is-pending">do domkniecia</span>
+              <span class="calendar-legend-chip is-import">wpis z ZL do przejecia</span>
+              <span class="calendar-legend-chip is-muted">bez naleznosci / przeniesione</span>
+            </div>
+
+            <div class="calendar-scroll">
+              <div class="calendar-week-shell" id="calendar-week-shell"></div>
+            </div>
+          </section>
+
+          <section class="panel calendar-unscheduled-panel" id="calendar-unscheduled-panel" hidden>
+            <div class="panel-header compact-header">
+              <div>
+                <p class="panel-label">Bez godziny</p>
+                <h3>Pozycje do ulozenia w tygodniu</h3>
+              </div>
+            </div>
+            <div class="calendar-unscheduled-list" id="calendar-unscheduled-list"></div>
           </section>
         </section>
 
